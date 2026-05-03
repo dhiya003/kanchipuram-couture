@@ -1,0 +1,8 @@
+{
+	"appId": "com.sareeheritage.app",
+	"appName": "Kanchipuram Couture",
+	"webDir": "dist",
+	"server": {
+		"androidScheme": "https"
+	}
+}
