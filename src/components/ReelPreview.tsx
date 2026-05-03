@@ -590,41 +590,64 @@ export default function ReelPreview({
 
         <div className="flex flex-col gap-4 w-full">
           <div className="flex gap-4">
-            <button 
-              onClick={restartReel}
-              className="p-5 rounded-2xl bg-white border border-saree-gold/20 text-saree-gold hover:bg-saree-gold hover:text-white transition-all shadow-md group flex items-center justify-center"
-              title="Restart Masterpiece"
-            >
-              <RefreshCcw className="w-5 h-5 group-active:rotate-180 transition-transform duration-500" />
-            </button>
+            {!isExporting && (
+              <button 
+                onClick={restartReel}
+                className="p-5 rounded-2xl bg-white border border-saree-gold/20 text-saree-gold hover:bg-saree-gold hover:text-white transition-all shadow-md group flex items-center justify-center"
+                title="Restart Masterpiece"
+              >
+                <RefreshCcw className="w-5 h-5 group-active:rotate-180 transition-transform duration-500" />
+              </button>
+            )}
             
-            <button 
-              onClick={onExport}
-              disabled={photos.length === 0 || isExporting}
-              className={`flex-1 py-5 rounded-2xl flex items-center justify-center gap-3 font-bold uppercase tracking-widest transition-all shadow-xl active:scale-95 group relative overflow-hidden ${
-                photos.length > 0 && !isExporting
-                  ? 'bg-saree-maroon text-white hover:bg-saree-maroon/90' 
-                  : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-              }`}
-            >
-              {isExporting ? (
-                <>
-                  <div 
-                    className="absolute inset-0 bg-white/20 transition-all duration-100 ease-linear"
-                    style={{ width: `${exportProgress}%` }}
-                  />
-                  <span className="relative z-10 flex items-center gap-2">
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Curation in Progress {Math.round(exportProgress)}%
-                  </span>
-                </>
-              ) : (
-                <>
-                  <Sparkles className="w-5 h-5" />
-                  Curate Masterpiece
-                </>
-              )}
-            </button>
+            <div className="flex-1 relative">
+              <AnimatePresence mode="wait">
+                {isExporting ? (
+                  <motion.div
+                    key="progress-bar"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    className="w-full py-2 space-y-3"
+                  >
+                    <div className="flex items-center justify-between px-1">
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="w-3 h-3 text-saree-gold animate-spin" />
+                        <span className="text-[10px] text-saree-maroon font-bold uppercase tracking-[0.2em]">Curation in Progress</span>
+                      </div>
+                      <span className="text-[10px] text-saree-maroon font-mono font-bold">{Math.round(exportProgress)}%</span>
+                    </div>
+                    <div className="h-4 w-full bg-stone-100 rounded-full border border-stone-200 overflow-hidden relative shadow-inner">
+                      <motion.div 
+                        initial={{ width: 0 }}
+                        animate={{ width: `${exportProgress}%` }}
+                        className="h-full bg-gradient-to-r from-saree-maroon to-saree-gold relative transition-all duration-300 ease-out"
+                      >
+                        <div className="absolute inset-0 bg-[linear-gradient(45deg,rgba(255,255,255,0.15)_25%,transparent_25%,transparent_50%,rgba(255,255,255,0.15)_50%,rgba(255,255,255,0.15)_75%,transparent_75%,transparent)] bg-[length:20px_20px] animate-progress-stripe" />
+                      </motion.div>
+                    </div>
+                    <p className="text-[9px] text-gray-400 italic text-center animate-pulse">Wait a moment while we curate your masterpiece...</p>
+                  </motion.div>
+                ) : (
+                  <motion.button 
+                    key="curate-button"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    onClick={onExport}
+                    disabled={photos.length === 0}
+                    className={`w-full py-5 rounded-2xl flex items-center justify-center gap-3 font-bold uppercase tracking-widest transition-all shadow-xl active:scale-95 group relative overflow-hidden ${
+                      photos.length > 0
+                        ? 'bg-saree-maroon text-white hover:bg-saree-maroon/90 shadow-saree-maroon/20' 
+                        : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                    }`}
+                  >
+                    <Sparkles className="w-5 h-5" />
+                    Curate Masterpiece
+                  </motion.button>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
           
           {videoUrl && !isExporting ? (

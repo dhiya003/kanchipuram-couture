@@ -301,23 +301,35 @@ const VideoExporter: React.FC<VideoExporterProps> = ({
         recorder.start(200);
         setStatus('processing');
 
-        let currentFrame = 0;
+        let isFinishing = false;
+        const stopRecorder = () => {
+          if (recorder.state !== 'inactive') {
+            console.log("Finalizing video file...");
+            recorder.stop();
+          }
+        };
+
+        const startTime = performance.now();
         
-        const renderLoop = () => {
+        const renderLoop = (now: number) => {
           if (isCancelled) return;
 
-          if (currentFrame >= totalFrames) {
-            console.log("Rendering complete, waiting for stabilizer...");
-            if (recorder.state !== 'inactive') {
-              // Add a small delay to ensure the encoder catches the last frames
-              setTimeout(() => {
-                if (recorder.state !== 'inactive') recorder.stop();
-              }, 800);
+          const elapsed = (now - startTime) / 1000;
+          
+          if (elapsed >= totalDuration) {
+            if (!isFinishing) {
+              isFinishing = true;
+              console.log("Total duration reached, finalizing capture...");
+              setTimeout(stopRecorder, 1500);
+            }
+            
+            // Draw last frame state while finishing
+            if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+              animationFrameId = requestAnimationFrame(renderLoop);
             }
             return;
           }
 
-          const elapsed = currentFrame / FPS;
           const currentProgress = (elapsed / totalDuration) * 100;
           setProgress(currentProgress);
           if (onProgress) onProgress(currentProgress);
@@ -392,14 +404,13 @@ const VideoExporter: React.FC<VideoExporterProps> = ({
             charCounter += line.length + 1;
           });
 
-          if (showWatermark) {
+          if (showWatermark && brandName) {
             ctx.font = 'bold 16px sans-serif'; 
             ctx.fillStyle = 'rgba(255,255,255,0.4)';
             ctx.textAlign = 'center'; 
             ctx.fillText(brandName.toUpperCase(), WIDTH / 2, HEIGHT - 80);
           }
 
-          currentFrame++;
           animationFrameId = requestAnimationFrame(renderLoop);
         };
 
@@ -449,7 +460,8 @@ const VideoExporter: React.FC<VideoExporterProps> = ({
     };
   }, []);
 
-  function drawCoverImage(ctx: CanvasRenderingContext2D, img: HTMLImageElement, scale: number, offsetX: number = 0, offsetY: number = 0) {
+  function drawCoverImage(ctx: CanvasRenderingContext2D, img: HTMLImageElement | undefined, scale: number, offsetX: number = 0, offsetY: number = 0) {
+    if (!img || !img.width) return;
     const imgRatio = img.width / img.height;
     const canvasRatio = WIDTH / HEIGHT;
     let dw, dh, ox, oy;

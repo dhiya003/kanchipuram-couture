@@ -145,8 +145,17 @@ body {
   100% { opacity: 0; transform: scale(5) rotate(90deg); filter: blur(60px); }
 }
 
+@keyframes progress-stripe {
+  from { background-position: 1rem 0; }
+  to { background-position: 0 0; }
+}
+
 .animate-camera-shake {
   animation: camera-shake 1.5s ease-out;
+}
+
+.animate-progress-stripe {
+  animation: progress-stripe 1s linear infinite;
 }
 
 .luxury-shimmer {
