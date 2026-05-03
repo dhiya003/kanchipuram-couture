@@ -256,18 +256,18 @@ const VideoExporter: React.FC<VideoExporterProps> = ({
             setExtension(videoExt);
             setVideoUrl(url);
             setStatus('done');
+            // Reset progress so parent is correctly notified
+            if (onProgress) onProgress(100);
             if (onReady) onReady(url);
             
-            // AUTOMATIC DOWNLOAD - Triggered immediately upon completion
-            handleDownload(url, videoExt);
-            
-            // If headless, we're done immediately after triggering download
+            // If headless, we're done immediately after readiness is signaled
             if (headless) {
               onComplete();
             }
           } catch (err) {
             console.error("Finalization failed:", err);
             setStatus('error');
+            if (headless) onComplete();
           }
         };
 

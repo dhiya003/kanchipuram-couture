@@ -21,6 +21,7 @@ interface ReelPreviewProps {
   onRestart?: () => void;
   isExporting?: boolean;
   exportProgress?: number;
+  videoUrl?: string | null;
 }
 
 const TRANSITION_VARIANTS = [
@@ -62,6 +63,7 @@ export default function ReelPreview({
   showWatermark = true,
   isExporting = false,
   exportProgress = 0,
+  videoUrl = null,
 }: ReelPreviewProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
@@ -290,6 +292,10 @@ export default function ReelPreview({
   const currentText = useMemo(() => {
     return storyTexts[currentIndex % storyTexts.length];
   }, [currentIndex, storyTexts]);
+
+  const handleExportClick = () => {
+    onExport?.();
+  };
 
   if (photos.length === 0) return null;
 
@@ -530,43 +536,63 @@ export default function ReelPreview({
           </div>
         </div>
 
-        <div className="flex flex-col sm:flex-row justify-center gap-4 w-full">
-          <button 
-            onClick={restartReel}
-            className="flex-1 p-5 rounded-2xl bg-white border border-saree-gold/20 text-saree-gold hover:bg-saree-gold hover:text-white transition-all shadow-md group flex items-center justify-center gap-3"
-            title="Restart Masterpiece"
-          >
-            <RefreshCcw className="w-5 h-5 group-active:rotate-180 transition-transform duration-500" />
-            <span className="text-[10px] uppercase font-bold tracking-widest">Replay Preview</span>
-          </button>
+        <div className="flex flex-col gap-4 w-full">
+          <div className="flex gap-4">
+            <button 
+              onClick={restartReel}
+              className="p-5 rounded-2xl bg-white border border-saree-gold/20 text-saree-gold hover:bg-saree-gold hover:text-white transition-all shadow-md group flex items-center justify-center"
+              title="Restart Masterpiece"
+            >
+              <RefreshCcw className="w-5 h-5 group-active:rotate-180 transition-transform duration-500" />
+            </button>
+            
+            <button 
+              onClick={onExport}
+              disabled={photos.length === 0 || isExporting}
+              className={`flex-1 py-5 rounded-2xl flex items-center justify-center gap-3 font-bold uppercase tracking-widest transition-all shadow-xl active:scale-95 group relative overflow-hidden ${
+                photos.length > 0 && !isExporting
+                  ? 'bg-saree-maroon text-white hover:bg-saree-maroon/90' 
+                  : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+              }`}
+            >
+              {isExporting ? (
+                <>
+                  <div 
+                    className="absolute inset-0 bg-white/20 transition-all duration-100 ease-linear"
+                    style={{ width: `${exportProgress}%` }}
+                  />
+                  <span className="relative z-10 flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Rendering {Math.round(exportProgress)}%
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Play className="w-5 h-5" />
+                  Render Reel
+                </>
+              )}
+            </button>
+          </div>
           
-          <button 
-            onClick={onExport}
-            disabled={photos.length === 0 || isExporting}
-            className={`flex-[2] px-10 py-5 rounded-2xl flex items-center justify-center gap-3 font-bold uppercase tracking-widest transition-all shadow-xl active:scale-95 group relative overflow-hidden ${
-              photos.length > 0 && !isExporting
-                ? 'bg-saree-maroon text-white hover:bg-saree-maroon/90' 
-                : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-            }`}
-          >
-            {isExporting ? (
-              <>
-                <div 
-                  className="absolute inset-0 bg-white/20 transition-all duration-100 ease-linear"
-                  style={{ width: `${exportProgress}%` }}
-                />
-                <span className="relative z-10 flex items-center gap-2">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Generating {Math.round(exportProgress)}%
-                </span>
-              </>
-            ) : (
-              <>
-                <Download className="w-5 h-5 group-hover:translate-y-1 transition-transform" />
-                Export Reel
-              </>
-            )}
-          </button>
+          {videoUrl && !isExporting ? (
+            <a 
+              href={videoUrl}
+              download={`nivra_reel_${Date.now()}.mp4`}
+              className="w-full py-5 rounded-2xl flex items-center justify-center gap-3 font-bold uppercase tracking-widest transition-all shadow-xl active:scale-95 group bg-saree-gold text-stone-950 hover:bg-saree-gold/90 shadow-saree-gold/20"
+            >
+              <Download className="w-5 h-5 animate-bounce" />
+              Download Reel
+            </a>
+          ) : (
+            <button 
+              disabled={true}
+              className="w-full py-5 rounded-2xl flex items-center justify-center gap-3 font-bold uppercase tracking-widest transition-all shadow-xl bg-stone-100 text-stone-400 cursor-not-allowed border-dashed border-2 border-stone-200"
+            >
+              <Download className="w-5 h-5" />
+              Download Reel
+            </button>
+          )}
         </div>
       </div>
 

@@ -59,6 +59,8 @@ export default function App() {
 
   const [showSettings, setShowSettings] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisProgress, setAnalysisProgress] = useState(0);
+  const [analysisStep, setAnalysisStep] = useState('');
   const [history, setHistory] = useState<Reel[]>(() => {
     const saved = localStorage.getItem('saree_reels_history');
     return saved ? JSON.parse(saved) : [];
@@ -103,11 +105,14 @@ export default function App() {
     if (photos.length === 0) return;
     
     setIsAnalyzing(true);
+    setAnalysisProgress(5);
+    setAnalysisStep('Observing fabric textures...');
     setVideoUrl(null); // Reset video URL on new analysis
     try {
-      // Prepare images for Gemini
+      // Prepare images for Gemini - parallel fetch
+      setAnalysisProgress(15);
       const imageParts = await Promise.all(
-        photos.slice(0, 3).map(async (p) => {
+        photos.slice(0, 4).map(async (p, idx) => {
           const response = await fetch(p.url);
           const blob = await response.blob();
           const base64 = await new Promise<string>((resolve) => {
@@ -115,6 +120,7 @@ export default function App() {
             reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
             reader.readAsDataURL(blob);
           });
+          setAnalysisProgress(prev => Math.min(prev + 10, 50));
           return {
             inlineData: {
               data: base64,
@@ -123,6 +129,9 @@ export default function App() {
           };
         })
       );
+
+      setAnalysisStep('Crafting poetic fragments...');
+      setAnalysisProgress(60);
 
       const prompt = `Analyze these saree photos. User notes: ${customNotes || "none"}.
       You are a luxury fashion curator and poetic storyteller. Generate:
@@ -184,17 +193,21 @@ export default function App() {
         }
       });
 
+      setAnalysisProgress(90);
+      setAnalysisStep('Finalizing curation...');
+
       const cleanedText = response.text.replace(/```json\n?|```/g, '').trim();
       const data = JSON.parse(cleanedText);
       if (data.captions) setStoryTexts(data.captions);
       if (data.aesthetic) setSelectedAesthetic(data.aesthetic);
       if (data.instagramCaption) setInstagramCaption(data.instagramCaption);
       
+      setAnalysisProgress(100);
     } catch (error) {
       console.error("AI Analysis Failed", error);
-      // Fallback is already handled by DEFAULT_STORY_TEXTS
     } finally {
       setIsAnalyzing(false);
+      setAnalysisProgress(0);
       if (!selectedSong && SOUTHERN_CLASSICS.length > 0) {
         setSelectedSong(SOUTHERN_CLASSICS[0]);
       }
@@ -208,7 +221,10 @@ export default function App() {
       setState('upload');
     }
     else if (state === 'upload') analyzeSarees();
-    else if (state === 'music') setState('preview');
+    else if (state === 'music') {
+      setState('preview');
+      startExport();
+    }
     else if (state === 'preview') {
       startExport();
     }
@@ -224,6 +240,14 @@ export default function App() {
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
 
+  // Reset video when creative settings change
+  useEffect(() => {
+    if (videoUrl) {
+      console.log("Creative settings changed, resetting prepared video.");
+      setVideoUrl(null);
+    }
+  }, [selectedSong, selectedTransition, selectedAesthetic]);
+
   useEffect(() => {
     return () => {
       if (videoUrl && videoUrl.startsWith('blob:')) {
@@ -234,10 +258,11 @@ export default function App() {
 
   const handleExportComplete = () => {
     setIsExporting(false);
-    // Don't auto-reset, let user decide
+    console.log("Export process finished.");
   };
 
   const startExport = () => {
+    if (isExporting || videoUrl) return; // Already exporting or finished
     setIsExporting(true);
     setExportProgress(0);
   };
@@ -386,7 +411,7 @@ export default function App() {
               exit={{ opacity: 0 }}
               className="absolute inset-0 z-[100] bg-saree-paper/95 backdrop-blur-sm flex flex-col items-center justify-center text-center p-8"
             >
-              <div className="w-24 h-24 relative mb-6">
+              <div className="w-24 h-24 relative mb-12">
                 <motion.div 
                   animate={{ rotate: 360 }}
                   transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
@@ -399,9 +424,41 @@ export default function App() {
                 >
                   <Sparkles className="w-8 h-8 text-saree-gold animate-pulse" />
                 </motion.div>
+                
+                {/* Visual Progress Ring */}
+                <svg className="absolute -inset-4 w-32 h-32 rotate-[-90deg]">
+                  <circle
+                    cx="64"
+                    cy="64"
+                    r="60"
+                    fill="transparent"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeDasharray={2 * Math.PI * 60}
+                    strokeDashoffset={2 * Math.PI * 60 * (1 - analysisProgress / 100)}
+                    className="text-saree-gold/20"
+                  />
+                </svg>
               </div>
-              <h3 className="display-text text-2xl text-saree-maroon italic mb-2">Curating Your Heritage Story...</h3>
-              <p className="serif-text text-gray-500 max-w-xs">Our AI is analyzing your sarees to craft poetic fragments for your reel.</p>
+              
+              <div className="space-y-4">
+                <h3 className="display-text text-2xl text-saree-maroon italic">{analysisStep || 'Curating Your Heritage Story...'}</h3>
+                <div className="w-64 h-1 bg-stone-100 rounded-full mx-auto overflow-hidden">
+                  <motion.div 
+                    className="h-full bg-saree-gold"
+                    initial={{ width: 0 }}
+                    animate={{ width: `${analysisProgress}%` }}
+                  />
+                </div>
+                <p className="serif-text text-[10px] uppercase tracking-[0.2em] text-saree-gold font-bold">
+                  {Math.round(analysisProgress)}% Processed
+                </p>
+                <p className="serif-text text-gray-500 max-w-xs mx-auto text-xs">
+                  {analysisProgress < 40 && "Identifying yarn patterns and silk weaves..."}
+                  {analysisProgress >= 40 && analysisProgress < 80 && "Translating visual elegance into poetic verses..."}
+                  {analysisProgress >= 80 && "Polishing your brand's digital presence..."}
+                </p>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -509,6 +566,7 @@ export default function App() {
                 onExport={startExport}
                 isExporting={isExporting}
                 exportProgress={exportProgress}
+                videoUrl={videoUrl}
               />
               
               {isExporting && (
