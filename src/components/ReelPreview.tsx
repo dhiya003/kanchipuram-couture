@@ -2,6 +2,9 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Photo, Song } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { Play, Pause, RefreshCcw, Share2, Download, Copy, Check, Instagram, PenSquare, Loader2 } from 'lucide-react';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
+import { Capacitor } from '@capacitor/core';
 
 interface ReelPreviewProps {
   photos: Photo[];
@@ -293,8 +296,55 @@ export default function ReelPreview({
     return storyTexts[currentIndex % storyTexts.length];
   }, [currentIndex, storyTexts]);
 
-  const handleExportClick = () => {
-    onExport?.();
+  const handleDownload = async () => {
+    if (!videoUrl) return;
+
+    if (Capacitor.isNativePlatform()) {
+      try {
+        console.log("Native download/share triggered for:", videoUrl);
+        // Fetch the blob from the URL
+        const response = await fetch(videoUrl);
+        const blob = await response.blob();
+        
+        // Convert to Base64 using FileReader (most reliable)
+        const reader = new FileReader();
+        const base64Data = await new Promise<string>((resolve, reject) => {
+          reader.onloadend = () => {
+            const res = reader.result as string;
+            resolve(res.split(',')[1]);
+          };
+          reader.onerror = () => reject(new Error("FileReader failed"));
+          reader.readAsDataURL(blob);
+        });
+
+        const fileName = `kanchipuram_couture_${new Date().getTime()}.mp4`;
+        
+        const savedFile = await Filesystem.writeFile({
+          path: fileName,
+          data: base64Data,
+          directory: Directory.Cache
+        });
+
+        await Share.share({
+          title: 'Kanchipuram Couture Reel',
+          text: 'My latest bridal reel creation',
+          url: savedFile.uri,
+          dialogTitle: 'Save or Share Reel'
+        });
+      } catch (err: any) {
+        console.error("Mobile share fail:", err);
+        alert("Mobile save failed. Try long-pressing the video preview instead.");
+      }
+      return;
+    }
+
+    // Regular web download
+    const a = document.createElement('a');
+    a.href = videoUrl;
+    a.download = `kanchipuram_couture_${Date.now()}.mp4`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   };
 
   if (photos.length === 0) return null;
@@ -576,14 +626,13 @@ export default function ReelPreview({
           </div>
           
           {videoUrl && !isExporting ? (
-            <a 
-              href={videoUrl}
-              download={`nivra_reel_${Date.now()}.mp4`}
+            <button 
+              onClick={handleDownload}
               className="w-full py-5 rounded-2xl flex items-center justify-center gap-3 font-bold uppercase tracking-widest transition-all shadow-xl active:scale-95 group bg-saree-gold text-stone-950 hover:bg-saree-gold/90 shadow-saree-gold/20"
             >
-              <Download className="w-5 h-5 animate-bounce" />
-              Download Reel
-            </a>
+              {Capacitor.isNativePlatform() ? <Share2 className="w-5 h-5 animate-pulse" /> : <Download className="w-5 h-5 animate-bounce" />}
+              {Capacitor.isNativePlatform() ? 'Save / Share Reel' : 'Download Reel'}
+            </button>
           ) : (
             <button 
               disabled={true}

@@ -89,39 +89,54 @@ export default function MusicSelector({ onSelect, selectedSong }: MusicSelectorP
           }, 15000);
 
           try {
-            // Fetch audio as blob to bypass simple origin restrictions
-            const response = await fetch(song.url);
-            if (!response.ok) throw new Error("Fetch failed");
+            // Attempt 1: Fetch as blob to verify access and bypass some origin issues
+            console.log("Attempting fetch for:", song.url);
+            const response = await fetch(song.url, { mode: 'cors' }).catch(() => null);
             
-            const blob = await response.blob();
-            const blobUrl = URL.createObjectURL(blob);
-            
-            const audio = new Audio();
-            audio.src = blobUrl;
-            audio.load();
-            
-            audio.oncanplaythrough = () => {
-              if (!resolved) {
-                resolved = true;
-                clearTimeout(timeout);
-                audioRef.current = audio;
-                resolve(true);
-              }
-            };
-
-            audio.onerror = () => {
-              if (!resolved) {
-                resolved = true;
-                clearTimeout(timeout);
-                resolve(false);
-              }
-            };
+            if (response && response.ok) {
+              const blob = await response.blob();
+              const blobUrl = URL.createObjectURL(blob);
+              
+              const audio = new Audio();
+              audio.src = blobUrl;
+              audio.load();
+              
+              audio.oncanplaythrough = () => {
+                if (!resolved) {
+                  resolved = true;
+                  clearTimeout(timeout);
+                  audioRef.current = audio;
+                  resolve(true);
+                }
+              };
+            } else {
+              // Attempt 2: Optimistic loading for simple Audio element
+              console.log("Fetch failed or no CORS, falling back to simple Audio for:", song.title);
+              const audio = new Audio();
+              audio.src = song.url;
+              audio.load();
+              
+              // On mobile, sometimes oncanplay doesn't fire until play() is called or just takes time
+              // but we want to be optimistic if it's a known URL
+              setTimeout(() => {
+                if (!resolved) {
+                  resolved = true;
+                  clearTimeout(timeout);
+                  audioRef.current = audio;
+                  resolve(true); // Optimistic success
+                }
+              }, 2000);
+            }
           } catch (e) {
             console.error("Music fetch failure:", e);
+            // Fallback to basic audio
+            const audio = new Audio();
+            audio.src = song.url;
+            audioRef.current = audio;
             if (!resolved) {
               resolved = true;
               clearTimeout(timeout);
-              resolve(false);
+              resolve(true);
             }
           }
         });
