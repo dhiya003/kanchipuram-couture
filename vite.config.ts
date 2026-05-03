@@ -8,6 +8,10 @@ export default defineConfig(({mode}) => {
   return {
     plugins: [react(), tailwindcss()],
     define: {
+      'process.env': process.env
+    },
+    build: {
+      target: 'es2020'
     },
     resolve: {
       alias: {

@@ -30,7 +30,21 @@ const DEFAULT_STORY_TEXTS = [
 
 import { GoogleGenAI, Type } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// Lazy initialization of Gemini AI to avoid crashing on boot if key is missing in APK
+let aiInstance: GoogleGenAI | null = null;
+const getAI = () => {
+  if (!aiInstance) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      console.warn("GEMINI_API_KEY is missing. AI features will not work.");
+      // Return a dummy instance or handle error gracefully in the app
+      aiInstance = new GoogleGenAI({ apiKey: 'MISSING' });
+    } else {
+      aiInstance = new GoogleGenAI({ apiKey });
+    }
+  }
+  return aiInstance;
+};
 
 export default function App() {
   const [state, setState] = useState<AppState>('landing');
@@ -157,6 +171,7 @@ export default function App() {
       }`;
 
       console.log("Starting saree analysis with model: gemini-2.0-flash");
+      const ai = getAI();
       const response = await ai.models.generateContent({
         model: "gemini-2.0-flash",
         contents: {
