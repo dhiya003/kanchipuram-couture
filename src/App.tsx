@@ -5,7 +5,7 @@
 
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Sparkles, ChevronRight, ChevronLeft, Instagram, Camera, Music as MusicIcon, History, Settings } from 'lucide-react';
+import { Sparkles, ChevronRight, ChevronLeft, Instagram, Camera, Music as MusicIcon, History, Settings, Crown, Gem, Flower2 } from 'lucide-react';
 import { AppState, Photo, Song, Reel } from './types';
 import PhotoUploader from './components/PhotoUploader';
 import MusicSelector, { SOUTHERN_CLASSICS } from './components/MusicSelector';
@@ -362,19 +362,27 @@ export default function App() {
 
       {/* Navigation Rail */}
       <header className="p-6 md:px-12 flex justify-between items-center z-50">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
           <button 
             onClick={() => {
               resetApp();
               setState('landing');
             }}
-            className="w-10 h-10 rounded-full bg-saree-maroon flex items-center justify-center text-white shadow-lg cursor-pointer"
+            className="group relative flex items-center justify-center"
           >
-            <Sparkles className="w-5 h-5" />
+            <div className="w-12 h-12 rounded-2xl bg-saree-maroon flex items-center justify-center text-white shadow-xl group-hover:rotate-6 transition-transform group-active:scale-90">
+              <Crown className="w-6 h-6 text-saree-gold" />
+            </div>
+            <div className="absolute -top-1 -right-1">
+              <Sparkles className="w-4 h-4 text-saree-gold animate-pulse" />
+            </div>
           </button>
-          <h1 className="text-xl display-text font-bold tracking-tighter text-saree-ink">
-            Kanchipuram <span className="text-saree-gold">Couture</span>
-          </h1>
+          <div>
+            <h1 className="text-xl display-text font-bold tracking-tight text-saree-ink flex flex-col leading-none">
+              <span>Kanchipuram</span>
+              <span className="text-[10px] uppercase tracking-[0.4em] text-saree-gold font-medium mt-1">Couture Studio</span>
+            </h1>
+          </div>
         </div>
         
         {state !== 'landing' && state !== 'history' && (
@@ -521,23 +529,47 @@ export default function App() {
               exit={{ opacity: 0, y: -20 }}
               className="max-w-4xl w-full text-center space-y-12"
             >
-              <div className="space-y-6">
-                <motion.span 
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 0.2 }}
-                  className="text-[10px] uppercase tracking-[0.5em] text-saree-gold font-bold"
+              <div className="space-y-8 flex flex-col items-center">
+                <motion.div 
+                  initial={{ scale: 0.8, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ duration: 0.8, ease: "easeOut" }}
+                  className="w-32 h-32 rounded-[2rem] bg-gradient-to-br from-saree-maroon to-stone-900 flex items-center justify-center relative shadow-2xl ring-4 ring-saree-gold/10"
                 >
-                  Est. 1924 • Handcrafted Heritage
-                </motion.span>
-                <h2 className="text-6xl md:text-8xl display-text font-medium leading-none text-saree-ink italic">
-                  Crafting <span className="text-saree-maroon">Stories</span> <br />
-                  in Silk
-                </h2>
-                <p className="max-w-xl mx-auto text-lg serif-text text-gray-500 leading-relaxed">
-                  Transform your masterpiece photography into cinematic bridal journeys. 
-                  An elite reel studio for the modern heritage weaver.
-                </p>
+                  <Crown className="w-16 h-16 text-saree-gold" strokeWidth={1} />
+                  <motion.div 
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
+                    className="absolute inset-0 border-2 border-dashed border-saree-gold/20 rounded-full scale-125"
+                  />
+                  <div className="absolute -top-4 -right-4 bg-saree-gold p-2 rounded-xl shadow-lg">
+                    <Sparkles className="w-4 h-4 text-stone-900" />
+                  </div>
+                </motion.div>
+
+                <div className="space-y-4">
+                  <motion.span 
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: 0.2 }}
+                    className="text-[12px] uppercase tracking-[0.6em] text-saree-gold font-bold bg-saree-gold/5 px-4 py-1 rounded-full"
+                  >
+                    Est. 1924 • Handcrafted Heritage
+                  </motion.span>
+                  <h2 className="text-6xl md:text-8xl display-text font-medium leading-[1.1] text-saree-ink">
+                    Crafting <span className="text-saree-maroon italic">Stories</span> <br />
+                    in <span className="relative">
+                      Silk
+                      <svg className="absolute -bottom-2 left-0 w-full h-2 text-saree-gold/30" viewBox="0 0 100 10" preserveAspectRatio="none">
+                        <path d="M0 5 Q 25 0 50 5 T 100 5" fill="none" stroke="currentColor" strokeWidth="2" />
+                      </svg>
+                    </span>
+                  </h2>
+                  <p className="max-w-xl mx-auto text-lg serif-text text-gray-500 leading-relaxed pt-2">
+                    Transform your masterpiece photography into cinematic bridal journeys. 
+                    An elite reel studio for the modern heritage weaver.
+                  </p>
+                </div>
               </div>
 
               <div className="flex flex-col items-center gap-6">

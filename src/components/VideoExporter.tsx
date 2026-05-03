@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { CheckCircle2, Download, Loader2, Music, AlertCircle, Share2, RefreshCcw } from 'lucide-react';
+import { CheckCircle2, Download, Loader2, Music, AlertCircle, Share2, RefreshCcw, Save } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
+import { Capacitor } from '@capacitor/core';
 
 interface Photo {
   id: string;
@@ -449,8 +452,58 @@ const VideoExporter: React.FC<VideoExporterProps> = ({
     ctx.drawImage(img, sx, sy, sw, sh);
   }
 
+  const handleSaveMobile = async (targetUrl: string) => {
+    if (!targetUrl) return;
+    
+    try {
+      setStatus('finalizing');
+      // Fetch the blob from the URL
+      const response = await fetch(targetUrl);
+      const blob = await response.blob();
+      
+      // Convert blob to base64
+      const reader = new FileReader();
+      const base64Data = await new Promise<string>((resolve) => {
+        reader.onloadend = () => {
+          const res = reader.result as string;
+          resolve(res.split(',')[1]); // Remove the data:video/mp4;base64, prefix
+        };
+        reader.readAsDataURL(blob);
+      });
+
+      const fileName = `kanchipuram_couture_${new Date().getTime()}.${extension}`;
+      
+      // Save to temporary directory first
+      const savedFile = await Filesystem.writeFile({
+        path: fileName,
+        data: base64Data,
+        directory: Directory.Cache
+      });
+
+      // Share the file (this allows saving to gallery or sending via IG/WhatsApp)
+      await Share.share({
+        title: 'Kanchipuram Couture Reel',
+        text: 'My latest bridal reel curation',
+        url: savedFile.uri,
+        dialogTitle: 'Save or Share Reel'
+      });
+      
+      setStatus('done');
+      console.log("Mobile share/save completed.");
+    } catch (err) {
+      console.error("Mobile save fail:", err);
+      setStatus('error');
+    }
+  };
+
   const handleDownload = (targetUrl: string, targetExt: string) => {
     if (!targetUrl) return;
+
+    if (Capacitor.isNativePlatform()) {
+      handleSaveMobile(targetUrl);
+      return;
+    }
+
     try {
       const a = document.createElement('a');
       a.href = targetUrl;
@@ -530,10 +583,22 @@ const VideoExporter: React.FC<VideoExporterProps> = ({
                 </div>
                 
                 <div className="space-y-4">
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => handleDownload(videoUrl, extension)}
+                    className="w-full py-5 bg-saree-gold text-stone-950 rounded-2xl font-bold uppercase tracking-widest flex items-center justify-center gap-3 shadow-lg shadow-saree-gold/20"
+                  >
+                    {Capacitor.isNativePlatform() ? <Share2 className="w-5 h-5" /> : <Download className="w-5 h-5" />}
+                    {Capacitor.isNativePlatform() ? 'Save / Share Reel' : 'Download Masterpiece'}
+                  </motion.button>
+
                   <div className="p-4 bg-white/5 rounded-xl border border-white/5">
                     <p className="text-[11px] text-stone-400 font-medium uppercase tracking-[0.2em] mb-2">Reel Generated Successfully</p>
                     <p className="text-[10px] text-stone-500 italic">
-                      The download was triggered automatically. If it didn't start, please long-press the video above to save it to your library.
+                      {Capacitor.isNativePlatform() 
+                        ? 'Click the button above to save the video to your device gallery.'
+                        : 'The download was triggered automatically. If it didn\'t start, please click the button above.'}
                     </p>
                   </div>
                 </div>
