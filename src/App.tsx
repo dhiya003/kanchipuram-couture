@@ -11,7 +11,6 @@ import PhotoUploader from './components/PhotoUploader';
 import MusicSelector, { SOUTHERN_CLASSICS } from './components/MusicSelector';
 import ReelPreview from './components/ReelPreview';
 import VideoExporter from './components/VideoExporter';
-import SuccessView from './components/SuccessView';
 import HistoryView from './components/HistoryView';
 
 const DEFAULT_STORY_TEXTS = [
@@ -27,6 +26,10 @@ const DEFAULT_STORY_TEXTS = [
   "Draped in Grace"
 ];
 
+import { GoogleGenAI, Type } from "@google/genai";
+
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
 export default function App() {
   const [state, setState] = useState<AppState>('landing');
   const [photos, setPhotos] = useState<Photo[]>([]);
@@ -36,8 +39,24 @@ export default function App() {
   const [storyTexts, setStoryTexts] = useState<string[]>(DEFAULT_STORY_TEXTS);
   const [instagramCaption, setInstagramCaption] = useState<string>('');
   const [selectedAesthetic, setSelectedAesthetic] = useState<string>('vintage_cinema');
-  const [brandName, setBrandName] = useState('SAREE HERITAGE');
-  const [showWatermark, setShowWatermark] = useState(true);
+  const [brandName, setBrandName] = useState(() => {
+    return localStorage.getItem('nivra_brand_name') || 'SAREE HERITAGE';
+  });
+  const [showWatermark, setShowWatermark] = useState(() => {
+    return localStorage.getItem('nivra_show_watermark') !== 'false';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('nivra_brand_name', brandName);
+  }, [brandName]);
+
+  useEffect(() => {
+    localStorage.setItem('nivra_show_watermark', String(showWatermark));
+  }, [showWatermark]);
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [state]);
+
   const [showSettings, setShowSettings] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [history, setHistory] = useState<Reel[]>(() => {
@@ -45,51 +64,137 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
-  const urlToBase64 = async (url: string): Promise<string> => {
-    const response = await fetch(url);
-    const blob = await response.blob();
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
+  const [exportSessionId, setExportSessionId] = useState(0);
+
+  const resetApp = () => {
+    console.log("Resetting app state for next curation...");
+    // Revoke all current photo URLs to free memory and prevent overlaps
+    const currentPhotos = [...photos];
+    currentPhotos.forEach(p => {
+      if (p.url && p.url.startsWith('blob:')) {
+        try {
+          URL.revokeObjectURL(p.url);
+        } catch (e) {
+          console.warn("Revoke failed for photo", p.id, e);
+        }
+      }
     });
+    
+    setPhotos([]);
+    setCustomNotes('');
+    setSelectedSong(undefined);
+    setStoryTexts([...DEFAULT_STORY_TEXTS]);
+    setInstagramCaption('');
+    setSelectedAesthetic('vintage_cinema');
+    setSelectedTransition('auto');
+    
+    if (videoUrl && typeof videoUrl === 'string' && videoUrl.startsWith('blob:')) {
+      try {
+        URL.revokeObjectURL(videoUrl);
+      } catch (e) {
+        console.warn("Revoke failed for videoUrl", e);
+      }
+    }
+    setVideoUrl(null);
+    setExportSessionId(prev => prev + 1);
   };
 
   const analyzeSarees = async () => {
     if (photos.length === 0) return;
+    
     setIsAnalyzing(true);
+    setVideoUrl(null); // Reset video URL on new analysis
     try {
-      // Prepare photos by converting first few to base64 for AI analysis
-      const photosForAI = await Promise.all(
+      // Prepare images for Gemini
+      const imageParts = await Promise.all(
         photos.slice(0, 3).map(async (p) => {
-          try {
-            const base64 = await urlToBase64(p.url);
-            return { ...p, base64 };
-          } catch (e) {
-            console.error("Failed to convert image to base64", e);
-            return p;
-          }
+          const response = await fetch(p.url);
+          const blob = await response.blob();
+          const base64 = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+            reader.readAsDataURL(blob);
+          });
+          return {
+            inlineData: {
+              data: base64,
+              mimeType: blob.type
+            }
+          };
         })
       );
 
-      const response = await fetch('/api/analyze-sarees', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ photos: photosForAI, customNotes })
+      const prompt = `Analyze these saree photos. User notes: ${customNotes || "none"}.
+      You are a luxury fashion curator and poetic storyteller. Generate:
+      1. 10 unique, cinematic reel captions (under 35 chars each).
+      2. A visual aesthetic: 'vintage_cinema', 'royal_palace', 'temple_aura', or 'modern_chic'.
+      3. A premium Instagram caption following the "NIVRA HIGH-CONVERSION CAPTION STRUCTURE".
+
+      NIVRA CAPTION RULES:
+      - First lines MUST be an SEO Hook: [Fabric] + [Color] + [Occasion] + [Emotion]
+      - Emotional Luxury Description: Short, sensory, premium.
+      - Product Details: Scannable (Fabric, Weave, Blouse, Feel, Occasion).
+      - Price: Include a realistic luxury price in INR (e.g., ₹4,000 to ₹15,000) based on perceived quality.
+      - Product Code: NIVRA-[Shortened Color]-[3-digit number].
+      - Scarcity: premium urgency.
+      - CTA: DM to order.
+      - Hashtags: 8-12 niche/broad hashtags.
+
+      Return ONLY a JSON object with:
+      {
+        "captions": ["string"],
+        "aesthetic": "string",
+        "instagramCaption": "string"
+      }`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: {
+          parts: [
+            ...imageParts.map(p => ({
+              inlineData: {
+                data: p.inlineData.data,
+                mimeType: p.inlineData.mimeType
+              }
+            })),
+            { text: prompt }
+          ]
+        },
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              captions: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+                description: "3-5 short aesthetic captions for story slides"
+              },
+              aesthetic: {
+                type: Type.STRING,
+                description: "One of internal aesthetic IDs: vintage_cinema, royal_palace, temple_aura, modern_chic"
+              },
+              instagramCaption: {
+                type: Type.STRING,
+                description: "Full premium Instagram caption following high-conversion structure"
+              }
+            },
+            required: ["captions", "aesthetic", "instagramCaption"]
+          }
+        }
       });
-      if (response.ok) {
-        const data = await response.json();
-        if (data.captions) setStoryTexts(data.captions);
-        if (data.aesthetic) setSelectedAesthetic(data.aesthetic);
-        if (data.instagramCaption) setInstagramCaption(data.instagramCaption);
-      }
+
+      const cleanedText = response.text.replace(/```json\n?|```/g, '').trim();
+      const data = JSON.parse(cleanedText);
+      if (data.captions) setStoryTexts(data.captions);
+      if (data.aesthetic) setSelectedAesthetic(data.aesthetic);
+      if (data.instagramCaption) setInstagramCaption(data.instagramCaption);
+      
     } catch (error) {
       console.error("AI Analysis Failed", error);
-      // Fallback to defaults (already set)
+      // Fallback is already handled by DEFAULT_STORY_TEXTS
     } finally {
       setIsAnalyzing(false);
-      // Auto-select a song if none selected
       if (!selectedSong && SOUTHERN_CLASSICS.length > 0) {
         setSelectedSong(SOUTHERN_CLASSICS[0]);
       }
@@ -98,31 +203,60 @@ export default function App() {
   };
 
   const nextStep = () => {
-    if (state === 'landing') setState('upload');
+    if (state === 'landing') {
+      resetApp();
+      setState('upload');
+    }
     else if (state === 'upload') analyzeSarees();
     else if (state === 'music') setState('preview');
-    else if (state === 'preview') setState('exporting');
+    else if (state === 'preview') {
+      startExport();
+    }
   };
 
   useEffect(() => {
     if (state === 'exporting') {
-      // Mock timer removed - logic moved to VideoExporter onComplete
+      setVideoUrl(null);
     }
   }, [state]);
 
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState(0);
+
+  useEffect(() => {
+    return () => {
+      if (videoUrl && videoUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(videoUrl);
+      }
+    };
+  }, [videoUrl]);
+
   const handleExportComplete = () => {
+    setIsExporting(false);
+    // Don't auto-reset, let user decide
+  };
+
+  const startExport = () => {
+    setIsExporting(true);
+    setExportProgress(0);
+  };
+
+  const saveToHistory = (url: string) => {
+    setVideoUrl(url);
+    // Don't reset state here, wait for completion
     const newReel: Reel = {
       id: Math.random().toString(36).substr(2, 9),
       createdAt: new Date().toISOString(),
       photos: [...photos],
       song: selectedSong,
+      texts: [...storyTexts],
+      aesthetic: selectedAesthetic,
       transitionType: selectedTransition
     };
     const updatedHistory = [newReel, ...history];
     setHistory(updatedHistory);
     localStorage.setItem('saree_reels_history', JSON.stringify(updatedHistory));
-    
-    setState('complete');
   };
 
   const deleteReel = (id: string) => {
@@ -134,6 +268,8 @@ export default function App() {
   const selectReelFromHistory = (reel: Reel) => {
     setPhotos(reel.photos);
     setSelectedSong(reel.song);
+    if (reel.texts) setStoryTexts(reel.texts);
+    if (reel.aesthetic) setSelectedAesthetic(reel.aesthetic);
     setSelectedTransition(reel.transitionType ?? 'auto');
     setState('preview');
   };
@@ -154,7 +290,10 @@ export default function App() {
       <header className="p-6 md:px-12 flex justify-between items-center z-50">
         <div className="flex items-center gap-3">
           <button 
-            onClick={() => setState('landing')}
+            onClick={() => {
+              resetApp();
+              setState('landing');
+            }}
             className="w-10 h-10 rounded-full bg-saree-maroon flex items-center justify-center text-white shadow-lg cursor-pointer"
           >
             <Sparkles className="w-5 h-5" />
@@ -191,11 +330,23 @@ export default function App() {
                   className="absolute right-0 top-full mt-4 w-64 glass-panel border border-saree-gold/20 shadow-2xl p-6 z-[100] text-left normal-case tracking-normal"
                 >
                   <h4 className="display-text text-lg text-saree-maroon mb-4">Studio Settings</h4>
-                  <div className="space-y-4">
+                  <div className="space-y-6">
+                    <div className="space-y-2">
+                       <label className="text-[10px] uppercase tracking-widest font-bold text-gray-400">Brand Identity</label>
+                       <input 
+                         type="text" 
+                         value={brandName}
+                         onChange={(e) => setBrandName(e.target.value)}
+                         className="w-full px-3 py-2 bg-white/50 border border-saree-gold/20 rounded-lg text-sm outline-none focus:border-saree-gold"
+                         placeholder="e.g. SAREE HERITAGE"
+                       />
+                       <p className="text-[8px] text-gray-400 italic">This will appear as your signature on every reel.</p>
+                    </div>
+
                     <div className="flex items-center justify-between gap-4">
                       <div className="flex flex-col">
                         <span className="text-sm font-semibold text-saree-ink">Brand Watermark</span>
-                        <span className="text-[10px] text-gray-400">Show brand name at the bottom</span>
+                        <span className="text-[10px] text-gray-400">Show signature on video</span>
                       </div>
                       <button 
                         onClick={(e) => {
@@ -225,7 +376,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col items-center justify-center px-6 relative">
+      <main key={`curation-main-${exportSessionId}`} className="flex-1 flex flex-col items-center justify-center px-6 relative">
         {/* AI Loading Overlay */}
         <AnimatePresence>
           {isAnalyzing && (
@@ -302,7 +453,7 @@ export default function App() {
 
           {state === 'upload' && (
             <motion.div 
-              key="upload"
+              key={`upload-${exportSessionId}`}
               initial={{ opacity: 0, x: 50 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -50 }}
@@ -313,15 +464,13 @@ export default function App() {
                 onPhotosChange={setPhotos}
                 notes={customNotes}
                 onNotesChange={setCustomNotes}
-                brandName={brandName}
-                onBrandNameChange={setBrandName}
               />
             </motion.div>
           )}
 
           {state === 'music' && (
             <motion.div 
-              key="music"
+              key={`music-${exportSessionId}`}
               initial={{ opacity: 0, x: 50 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -50 }}
@@ -333,60 +482,57 @@ export default function App() {
 
           {state === 'preview' && (
             <motion.div 
-              key="preview"
+              key={`preview-${exportSessionId}`}
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 1.1 }}
-              className="w-full h-full"
+              className="w-full h-full relative"
             >
               <ReelPreview 
                 photos={photos} 
-                song={selectedSong} 
+                song={selectedSong || SOUTHERN_CLASSICS[0]} 
                 storyTexts={storyTexts}
+                onTextChange={setStoryTexts}
                 instagramCaption={instagramCaption}
                 onInstagramCaptionChange={setInstagramCaption}
+                onBack={() => setState('music')}
+                onRestart={() => {
+                  resetApp();
+                  setState('landing');
+                }}
                 transitionType={selectedTransition}
                 onTransitionChange={setSelectedTransition}
-                onTextChange={setStoryTexts}
                 aesthetic={selectedAesthetic}
                 onAestheticChange={setSelectedAesthetic}
                 brandName={brandName}
                 showWatermark={showWatermark}
-                onExport={() => setState('exporting')} 
+                onExport={startExport}
+                isExporting={isExporting}
+                exportProgress={exportProgress}
               />
+              
+              {isExporting && (
+                <VideoExporter 
+                  photos={photos} 
+                  song={selectedSong || null} 
+                  texts={storyTexts} 
+                  transitionType={selectedTransition}
+                  aesthetic={selectedAesthetic}
+                  brandName={brandName}
+                  showWatermark={showWatermark}
+                  headless={true}
+                  onProgress={setExportProgress}
+                  onReady={saveToHistory}
+                  onComplete={handleExportComplete} 
+                />
+              )}
             </motion.div>
           )}
 
           {state === 'exporting' && (
-            <motion.div 
-              key="exporting"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="w-full h-full"
-            >
-              <VideoExporter 
-                photos={photos} 
-                song={selectedSong} 
-                texts={storyTexts} 
-                transitionType={selectedTransition}
-                aesthetic={selectedAesthetic}
-                brandName={brandName}
-                showWatermark={showWatermark}
-                onComplete={handleExportComplete} 
-              />
-            </motion.div>
-          )}
-
-          {state === 'complete' && (
-            <motion.div 
-              key="complete"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="w-full h-full"
-            >
-              <SuccessView onRestart={() => setState('landing')} />
-            </motion.div>
+            <div className="hidden">
+              {/* Exporting is now handled headless in the preview block */}
+            </div>
           )}
 
           {state === 'history' && (
@@ -402,6 +548,14 @@ export default function App() {
                 onBack={() => setState('landing')} 
                 onSelectReel={selectReelFromHistory}
                 onDeleteReel={deleteReel}
+                onDownloadReel={(reel) => {
+                  setPhotos(reel.photos);
+                  setSelectedSong(reel.song);
+                  if (reel.texts) setStoryTexts(reel.texts);
+                  if (reel.aesthetic) setSelectedAesthetic(reel.aesthetic);
+                  setSelectedTransition(reel.transitionType ?? 'auto');
+                  setState('exporting');
+                }}
               />
             </motion.div>
           )}
@@ -435,7 +589,7 @@ export default function App() {
                 : 'bg-saree-gold text-white hover:bg-saree-maroon shadow-lg active:scale-95'
               }`}
             >
-              {state === 'preview' ? 'Complete' : 'Continue'}
+              {state === 'preview' ? 'Export Reel' : 'Continue'}
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>

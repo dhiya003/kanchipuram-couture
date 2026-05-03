@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Photo, Song } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { Play, Pause, RefreshCcw, Share2, Download, Copy, Check, Instagram, PenSquare } from 'lucide-react';
+import { Play, Pause, RefreshCcw, Share2, Download, Copy, Check, Instagram, PenSquare, Loader2 } from 'lucide-react';
 
 interface ReelPreviewProps {
   photos: Photo[];
@@ -17,6 +17,10 @@ interface ReelPreviewProps {
   onInstagramCaptionChange?: (caption: string) => void;
   brandName?: string;
   showWatermark?: boolean;
+  onBack?: () => void;
+  onRestart?: () => void;
+  isExporting?: boolean;
+  exportProgress?: number;
 }
 
 const TRANSITION_VARIANTS = [
@@ -32,14 +36,14 @@ const TRANSITION_VARIANTS = [
 ];
 
 const TEXT_STYLES = [
-  { container: "bottom-20 inset-x-0 text-center", label: "THE COLLECTION" },
+  { container: "bottom-20 inset-x-4 text-center max-w-[90%] mx-auto", label: "THE COLLECTION" },
   { container: "bottom-20 left-8 text-left max-w-[80%]", label: "HERITAGE" },
   { container: "top-20 left-8 text-left max-w-[80%]", label: "SIGNATURE" },
-  { container: "bottom-32 inset-x-0 text-center", label: "TIMELESS SILK" },
-  { container: "top-40 inset-x-0 text-center", label: "ETHEREAL" },
-  { container: "bottom-40 right-8 text-right max-w-[80%]", label: "CRAFTMANSHIP" },
-  { container: "top-1/3 inset-x-12 text-center", label: "ARTISTRY" },
-  { container: "bottom-1/4 left-10 text-left", label: "BRIDE'S CHOICE" }
+  { container: "bottom-32 inset-x-4 text-center max-w-[90%] mx-auto", label: "TIMELESS SILK" },
+  { container: "top-40 inset-x-4 text-center max-w-[90%] mx-auto", label: "ETHEREAL" },
+  { container: "bottom-40 right-8 text-right ml-auto max-w-[80%]", label: "CRAFTMANSHIP" },
+  { container: "top-1/3 inset-x-4 text-center max-w-[90%] mx-auto", label: "ARTISTRY" },
+  { container: "bottom-1/4 left-10 text-left max-w-[80%]", label: "BRIDE'S CHOICE" }
 ];
 
 export default function ReelPreview({ 
@@ -55,7 +59,9 @@ export default function ReelPreview({
   instagramCaption = '',
   onInstagramCaptionChange,
   brandName = 'SAREE HERITAGE',
-  showWatermark = true
+  showWatermark = true,
+  isExporting = false,
+  exportProgress = 0,
 }: ReelPreviewProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
@@ -64,6 +70,7 @@ export default function ReelPreview({
   const [isCopying, setIsCopying] = useState(false);
   const [isEditingCaption, setIsEditingCaption] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const handleCopyCaption = () => {
     navigator.clipboard.writeText(instagramCaption);
@@ -71,8 +78,61 @@ export default function ReelPreview({
     setTimeout(() => setIsCopying(false), 2000);
   };
 
+  const insertFormatting = (prefix: string, suffix: string = prefix) => {
+    if (!textareaRef.current) return;
+    
+    const start = textareaRef.current.selectionStart;
+    const end = textareaRef.current.selectionEnd;
+    const text = instagramCaption;
+    const before = text.substring(0, start);
+    const selection = text.substring(start, end);
+    const after = text.substring(end);
+    
+    const newText = before + prefix + selection + suffix + after;
+    onInstagramCaptionChange?.(newText);
+    
+    // Reset focus and selection
+    setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+        textareaRef.current.setSelectionRange(
+          start + prefix.length,
+          end + prefix.length
+        );
+      }
+    }, 0);
+  };
+
+  const renderMarkdown = (text: string) => {
+    // Escape HTML first
+    const escapedText = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+
+    // Simple markdown parsing for bold (*) and italic (_)
+    // We use a safe approach by splitting and rendering as React elements if we want to be safe, 
+    // but a string replacement with dangerouslySetInnerHTML is often what's requested for "visual rendering" 
+    // in these simple mock-ups. However, I'll do it safely with a component.
+    return text.split(/(\*.*?\*|_.*?_)/g).map((part, i) => {
+      if (part.startsWith('*') && part.endsWith('*')) {
+        return <strong key={i} className="font-bold">{part.slice(1, -1)}</strong>;
+      }
+      if (part.startsWith('_') && part.endsWith('_')) {
+        return <em key={i} className="italic">{part.slice(1, -1)}</em>;
+      }
+      return part;
+    });
+  };
+
+  const seoHookThreshold = 125;
+  const isHookValid = instagramCaption.length > 20 && instagramCaption.length <= seoHookThreshold;
+  const captionLength = instagramCaption.length;
+
   // Cycle duration per photo in ms
-  const PHOTO_DURATION = 3000;
+  const PHOTO_DURATION = 4000;
 
   // Ensure minimum 10 seconds (roughly 4 segments of 3s each)
   const displayPhotos = useMemo(() => {
@@ -121,19 +181,33 @@ export default function ReelPreview({
           audioRef.current = null;
         }
 
-        const newAudio = new Audio(song.url);
-        newAudio.loop = true;
-        newAudio.preload = 'auto'; // Force extra buffering info
+        const newAudio = new Audio();
+        newAudio.crossOrigin = "anonymous";
         
+        // Wait for connection/loading to verify source
+        const checkAudio = new Promise<boolean>((resolve) => {
+          newAudio.oncanplay = () => resolve(true);
+          newAudio.onerror = () => resolve(false);
+          // Don't wait forever
+          setTimeout(() => resolve(false), 2000);
+        });
+
+        newAudio.src = song.url;
+        newAudio.loop = true;
+        newAudio.preload = 'auto';
+        
+        const isSupported = await checkAudio;
+        if (!isSupported) {
+          console.warn("Audio source not supported or failed to load:", song.url);
+          if (isCancelled) return;
+          audioRef.current = null;
+          return;
+        }
+
         if (song.startOffset) {
           newAudio.currentTime = song.startOffset;
         }
         
-        newAudio.onerror = (e) => {
-          console.error("Audio failed to load:", song.url, e);
-          // Optional: set a UI state for audio error
-        };
-
         if (isCancelled) return;
         audioRef.current = newAudio;
         
@@ -241,7 +315,7 @@ export default function ReelPreview({
             exit={currentVariant.exit}
             transition={{ 
               opacity: { duration: 0.8 },
-              scale: { duration: 3, ease: "linear" },
+              scale: { duration: 4, ease: "linear" },
               filter: { duration: 0.8 },
               x: { duration: 0.8 },
               y: { duration: 0.8 } 
@@ -316,21 +390,35 @@ export default function ReelPreview({
                   />
                 ) : (
                   <h2 className={`text-2xl md:text-3xl text-white drop-shadow-xl leading-tight overflow-hidden ${aesthetic === 'modern_chic' ? 'font-sans font-bold uppercase tracking-tight' : 'italic display-text'}`}>
-                    {currentText.split('').map((char, index) => (
-                      <motion.span
-                        key={`${displayPhotos[currentIndex].id}-${currentIndex}-${index}`}
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        transition={{ 
-                          delay: 0.6 + (index * 0.05), 
-                          duration: 0.1,
-                          ease: "linear"
-                        }}
-                        className="inline-block whitespace-pre"
-                      >
-                        {char}
-                      </motion.span>
-                    ))}
+                    {currentText.split(' ').map((word, wordIndex, wordsArr) => {
+                      // Calculate starting global index for this word
+                      const wordStartGlobalIndex = wordsArr
+                        .slice(0, wordIndex)
+                        .reduce((sum, w) => sum + w.length + 1, 0);
+
+                      return (
+                        <span key={`${currentIndex}-${wordIndex}`} className="inline-block whitespace-nowrap">
+                          {word.split('').map((char, charIndex) => (
+                            <motion.span
+                              key={`${currentIndex}-${wordIndex}-${charIndex}`}
+                              initial={{ opacity: 0 }}
+                              animate={{ opacity: 1 }}
+                              transition={{ 
+                                delay: 0.5 + ((wordStartGlobalIndex + charIndex) * 0.04), 
+                                duration: 0.05,
+                                ease: "linear"
+                              }}
+                              className="inline-block"
+                            >
+                              {char}
+                            </motion.span>
+                          ))}
+                          {wordIndex < wordsArr.length - 1 && (
+                            <span className="inline-block animate-pulse">&nbsp;</span>
+                          )}
+                        </span>
+                      );
+                    })}
                   </h2>
                 )}
                 {!isEditing && (
@@ -442,30 +530,42 @@ export default function ReelPreview({
           </div>
         </div>
 
-        <div className="flex justify-center gap-4">
+        <div className="flex flex-col sm:flex-row justify-center gap-4 w-full">
           <button 
             onClick={restartReel}
-            className="p-4 rounded-full bg-white border border-saree-gold/20 text-saree-gold hover:bg-saree-gold hover:text-white transition-all shadow-md group"
-            title="Restart"
+            className="flex-1 p-5 rounded-2xl bg-white border border-saree-gold/20 text-saree-gold hover:bg-saree-gold hover:text-white transition-all shadow-md group flex items-center justify-center gap-3"
+            title="Restart Masterpiece"
           >
-            <RefreshCcw className="w-6 h-6 group-active:rotate-180 transition-transform duration-500" />
+            <RefreshCcw className="w-5 h-5 group-active:rotate-180 transition-transform duration-500" />
+            <span className="text-[10px] uppercase font-bold tracking-widest">Replay Preview</span>
           </button>
           
           <button 
             onClick={onExport}
-            className={`px-8 py-4 rounded-full flex items-center gap-2 font-medium transition-all shadow-lg active:scale-95 ${
-              photos.length > 0 ? 'bg-saree-maroon text-white hover:bg-saree-maroon/90 shadow-lg' : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+            disabled={photos.length === 0 || isExporting}
+            className={`flex-[2] px-10 py-5 rounded-2xl flex items-center justify-center gap-3 font-bold uppercase tracking-widest transition-all shadow-xl active:scale-95 group relative overflow-hidden ${
+              photos.length > 0 && !isExporting
+                ? 'bg-saree-maroon text-white hover:bg-saree-maroon/90' 
+                : 'bg-gray-200 text-gray-400 cursor-not-allowed'
             }`}
           >
-            <Download className="w-5 h-5" />
-            Export Reel
-          </button>
-
-          <button 
-            className="p-4 rounded-full bg-white border border-saree-gold/20 text-saree-gold hover:bg-saree-gold hover:text-white transition-all shadow-md"
-            title="Share"
-          >
-            <Share2 className="w-6 h-6" />
+            {isExporting ? (
+              <>
+                <div 
+                  className="absolute inset-0 bg-white/20 transition-all duration-100 ease-linear"
+                  style={{ width: `${exportProgress}%` }}
+                />
+                <span className="relative z-10 flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Generating {Math.round(exportProgress)}%
+                </span>
+              </>
+            ) : (
+              <>
+                <Download className="w-5 h-5 group-hover:translate-y-1 transition-transform" />
+                Export Reel
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -479,57 +579,123 @@ export default function ReelPreview({
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="w-full mt-8 p-6 rounded-3xl bg-white border border-saree-gold/10 shadow-sm space-y-4"
+          className="w-full mt-8 p-6 rounded-3xl bg-white border border-saree-gold/10 shadow-xl space-y-4"
         >
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-2 text-saree-maroon">
               <Instagram className="w-5 h-5" />
-              <h4 className="display-text text-xl font-medium">Nivra High-Conversion Caption</h4>
+              <h4 className="display-text text-xl font-medium">Instagram Conversion Machine</h4>
             </div>
-            <div className="flex items-center gap-2">
+            
+            <div className="flex items-center gap-3">
               <button
                 onClick={() => setIsEditingCaption(!isEditingCaption)}
-                className="p-2 rounded-full hover:bg-saree-gold/10 text-saree-gold transition-colors"
-                title="Edit Caption"
+                className={`p-2.5 rounded-full transition-all ${isEditingCaption ? 'bg-saree-maroon text-white shadow-md' : 'hover:bg-saree-gold/10 text-saree-gold'}`}
+                title={isEditingCaption ? "Finish Editing" : "Edit Caption"}
               >
-                <PenSquare className="w-5 h-5" />
+                {isEditingCaption ? <Check className="w-5 h-5" /> : <PenSquare className="w-5 h-5" />}
               </button>
+              
               <button
                 onClick={handleCopyCaption}
-                className="flex items-center gap-2 px-4 py-2 bg-saree-gold text-white rounded-full text-[10px] font-bold uppercase tracking-widest hover:bg-saree-maroon transition-all shadow-md active:scale-95"
+                className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-3 bg-saree-maroon text-white rounded-full text-xs font-bold uppercase tracking-[0.15em] hover:bg-saree-ink transition-all shadow-lg active:scale-95 group"
               >
                 {isCopying ? (
                   <>
-                    <Check className="w-3 h-3" />
-                    Copied
+                    <Check className="w-4 h-4" />
+                    Copied!
                   </>
                 ) : (
                   <>
-                    <Copy className="w-3 h-3" />
-                    Copy Text
+                    <Copy className="w-4 h-4 group-hover:scale-110 transition-transform" />
+                    Copy to Instagram
                   </>
                 )}
               </button>
             </div>
           </div>
 
+          {/* Character Counters */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className={`p-3 rounded-xl border flex flex-col items-center justify-center transition-colors ${isHookValid ? 'bg-green-50 border-green-100' : 'bg-orange-50 border-orange-100'}`}>
+              <span className="text-[9px] uppercase tracking-widest font-bold text-gray-400 mb-1">SEO Hook (Lines 1-2)</span>
+              <div className="flex items-end gap-1">
+                <span className={`text-lg font-bold font-mono ${captionLength > seoHookThreshold ? 'text-orange-500' : 'text-saree-maroon'}`}>
+                  {Math.min(captionLength, seoHookThreshold)}
+                </span>
+                <span className="text-[10px] text-gray-400 mb-1">/ {seoHookThreshold}</span>
+              </div>
+            </div>
+            
+            <div className="p-3 rounded-xl border border-gray-100 bg-gray-50 flex flex-col items-center justify-center">
+              <span className="text-[9px] uppercase tracking-widest font-bold text-gray-400 mb-1">Total Length</span>
+              <div className="flex items-end gap-1">
+                <span className="text-lg font-bold font-mono text-saree-maroon">{captionLength}</span>
+                <span className="text-[10px] text-gray-400 mb-1">/ 2200</span>
+              </div>
+            </div>
+          </div>
+
           <div className="relative group">
+            {isEditingCaption && (
+              <div className="absolute -top-14 left-0 right-0 flex items-center gap-2 p-2 bg-white border border-saree-gold/20 rounded-2xl shadow-lg z-20 overflow-x-auto no-scrollbar">
+                <button 
+                  onClick={() => insertFormatting('*')} 
+                  className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-saree-gold/10 rounded-lg text-xs font-bold text-saree-maroon transition-colors whitespace-nowrap"
+                  title="Make selection bold"
+                >
+                  <span className="bg-gray-100 px-1 rounded uppercase text-[8px] mr-1">Bold</span>
+                  *text*
+                </button>
+                <button 
+                  onClick={() => insertFormatting('_')} 
+                  className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-saree-gold/10 rounded-lg text-xs font-italic italic text-saree-maroon transition-colors whitespace-nowrap"
+                  title="Make selection italic"
+                >
+                  <span className="bg-gray-100 px-1 rounded uppercase text-[8px] mr-1 not-italic">Italic</span>
+                  _text_
+                </button>
+                <div className="h-4 w-[1px] bg-gray-200 mx-1 flex-shrink-0" />
+                <button 
+                  onClick={() => insertFormatting('\n\n')} 
+                  className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-saree-gold/10 rounded-lg text-xs text-saree-gold transition-colors whitespace-nowrap"
+                  title="Insert a line break"
+                >
+                  ¶ New Line
+                </button>
+                <div className="h-4 w-[1px] bg-gray-200 mx-1 flex-shrink-0" />
+                <span className="text-[8px] text-gray-400 uppercase tracking-tighter flex-shrink-0 pr-2">Nivra Tools</span>
+              </div>
+            )}
+
             {isEditingCaption ? (
               <textarea
+                ref={textareaRef}
                 value={instagramCaption}
                 onChange={(e) => onInstagramCaptionChange?.(e.target.value)}
-                className="w-full min-h-[300px] p-4 text-sm font-sans leading-relaxed text-gray-700 bg-gray-50 border border-saree-gold/20 rounded-xl focus:ring-1 focus:ring-saree-gold outline-none resize-none"
+                className="w-full min-h-[300px] p-5 text-sm font-sans leading-relaxed text-gray-700 bg-white border border-saree-gold/20 rounded-2xl focus:ring-2 focus:ring-saree-gold/20 focus:border-saree-gold outline-none resize-none shadow-inner"
+                placeholder="Compose your high-conversion caption..."
               />
             ) : (
-              <div className="w-full min-h-[100px] p-4 text-sm font-sans leading-relaxed text-gray-700 whitespace-pre-wrap bg-saree-gold/5 rounded-xl border border-saree-gold/5">
-                {instagramCaption}
+              <div className="w-full min-h-[150px] p-5 text-sm font-sans leading-relaxed text-gray-700 whitespace-pre-wrap bg-saree-gold/5 rounded-2xl border border-saree-gold/10 relative overflow-hidden">
+                {/* Visual feedback for the SEO Hook threshold */}
+                <div className="absolute top-0 left-0 w-1.5 h-full bg-saree-gold/20" />
+                <div className="relative">
+                  {renderMarkdown(instagramCaption.substring(0, seoHookThreshold))}
+                  <span className="opacity-30">{renderMarkdown(instagramCaption.substring(seoHookThreshold))}</span>
+                </div>
               </div>
             )}
           </div>
 
-          <div className="flex items-center gap-2 text-[10px] text-gray-400 font-bold uppercase tracking-[0.2em] bg-gray-50 p-3 rounded-lg">
-            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-            Optimized for Search & Conversion
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4 text-[10px] text-gray-400 font-bold uppercase tracking-[0.2em]">
+            <div className="flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-lg flex-1">
+              <span className={`w-2 h-2 rounded-full ${isHookValid ? 'bg-green-500 animate-pulse' : 'bg-orange-400 animate-bounce'}`} />
+              {isHookValid ? 'Hook Impact: High' : 'Optimize first 125 chars'}
+            </div>
+            <p className="text-[8px] italic normal-case text-gray-300">
+              * Instagram filters most text after 125 characters. Focus on the hook!
+            </p>
           </div>
         </motion.div>
       )}

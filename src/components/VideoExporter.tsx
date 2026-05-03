@@ -1,557 +1,567 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Photo, Song } from '../types';
-import { motion } from 'motion/react';
-import { Sparkles, Loader2, Download, CheckCircle2, Film } from 'lucide-react';
+import { CheckCircle2, Download, Loader2, Music, AlertCircle, Share2, RefreshCcw } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+
+interface Photo {
+  id: string;
+  url: string;
+  color: string;
+}
+
+interface Song {
+  id: string;
+  title: string;
+  artist: string;
+  url: string;
+  duration: number;
+}
 
 interface VideoExporterProps {
   photos: Photo[];
-  song?: Song;
   texts: string[];
-  transitionType?: number | 'auto';
+  song: Song | null;
+  aesthetic: string;
+  brandName: string;
+  showWatermark: boolean;
+  transitionType: 'auto' | number;
+  onReady?: (url: string) => void;
   onComplete: () => void;
-  aesthetic?: string;
-  brandName?: string;
-  showWatermark?: boolean;
+  headless?: boolean;
+  onProgress?: (progress: number) => void;
 }
 
-export default function VideoExporter({ photos, song, texts, transitionType = 'auto', onComplete, aesthetic = 'vintage_cinema', brandName = 'SAREE HERITAGE', showWatermark = true }: VideoExporterProps) {
+const WIDTH = 720;
+const HEIGHT = 1280;
+const FPS = 30;
+const PHOTO_DURATION = 4;
+
+const TEXT_STYLES_DATA = [
+  { label: "THE COLLECTION", align: 'center', y: HEIGHT - 240 },
+  { label: "HERITAGE", align: 'left', x: 80, y: HEIGHT - 240 },
+  { label: "SIGNATURE", align: 'left', x: 80, y: 260 },
+  { label: "TIMELESS SILK", align: 'center', y: HEIGHT - 340 },
+  { label: "ETHEREAL", align: 'center', y: 460 },
+  { label: "CRAFTMANSHIP", align: 'right', x: WIDTH - 80, y: HEIGHT - 440 },
+  { label: "ARTISTRY", align: 'center', y: HEIGHT / 3 + 60 },
+  { label: "BRIDE'S CHOICE", align: 'left', x: 100, y: HEIGHT * 0.75 + 10 }
+];
+
+const VideoExporter: React.FC<VideoExporterProps> = ({ 
+  photos, 
+  texts, 
+  song, 
+  aesthetic, 
+  brandName, 
+  showWatermark,
+  transitionType,
+  onReady,
+  onComplete,
+  headless = false,
+  onProgress
+}) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const [progress, setProgress] = useState(0);
-  const [status, setStatus] = useState<'loading' | 'recording' | 'finalizing' | 'done'>('loading');
+  const [status, setStatus] = useState<'loading' | 'processing' | 'finalizing' | 'done' | 'error'>('loading');
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [extension, setExtension] = useState('webm');
-  
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) {
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = words[0];
+
+    for (let i = 1; i < words.length; i++) {
+      const word = words[i];
+      const width = ctx.measureText(currentLine + " " + word).width;
+      if (width < maxWidth) {
+        currentLine += " " + word;
+      } else {
+        lines.push(currentLine);
+        currentLine = word;
+      }
+    }
+    lines.push(currentLine);
+    return lines;
+  }
+
   const recorderRef = useRef<MediaRecorder | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  
-  const PHOTO_DURATION = 3; // seconds
-  const FPS = 30;
-  const WIDTH = 1080; // Upgraded from 720
-  const HEIGHT = 1920; // Upgraded from 1280
 
   useEffect(() => {
-    if (status === 'loading') {
-      startExport();
-    }
-  }, [status]);
+    console.log("VideoExporter mounted. Starting processExport.");
+    let isCancelled = false;
+    let audioCtx: AudioContext | null = null;
+    let combinedStream: MediaStream | null = null;
+    let audio: HTMLAudioElement | null = null;
+    let animationFrameId: number = 0;
 
-  async function startExport() {
-    if (!canvasRef.current || photos.length === 0) return;
-
-    setStatus('recording');
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d', { alpha: false });
-    if (!ctx) return;
-
-    // 1. Prepare Audio
-    let audioStream: MediaStream | null = null;
-    if (song?.url) {
+    const processExport = async () => {
       try {
-        const audio = new Audio(song.url);
+        setStatus('loading');
+        console.log("Process Export Started with:", { 
+          photosCount: photos.length, 
+          hasSong: !!song, 
+          aesthetic, 
+          transitionType 
+        });
+        const canvas = canvasRef.current;
+        if (!canvas) {
+          console.error("Canvas ref is null!");
+          setStatus('error');
+          return;
+        }
+        const ctx = canvas.getContext('2d', { alpha: false });
+        if (!ctx) {
+          console.error("Could not get 2d context!");
+          setStatus('error');
+          return;
+        }
+
+        if (!window.MediaRecorder) {
+          console.error("MediaRecorder not supported in this browser!");
+          setStatus('error');
+          return;
+        }
+
+        console.log("Assets loading started...");
+        // Load images
+        const images = await Promise.all(photos.map(p => {
+          return new Promise<HTMLImageElement>((resolve, reject) => {
+            const img = new Image();
+            img.crossOrigin = "anonymous";
+            img.onload = () => resolve(img);
+            img.onerror = () => {
+              console.error(`Failed to load image: ${p.url}`);
+              reject();
+            };
+            img.src = p.url;
+          });
+        })).catch(err => {
+          console.error("One or more images failed to load.");
+          throw new Error("IMAGE_LOAD_FAILED");
+        });
+
+        if (isCancelled) return;
+
+        let displayImages = images;
+        let displayTexts = texts;
+        if (images.length === 1) {
+          displayImages = [images[0], images[0], images[0], images[0]];
+          displayTexts = [texts[0] || '', texts[0] || '', texts[0] || '', texts[0] || ''];
+        } else if (images.length === 2) {
+          displayImages = [images[0], images[1], images[0], images[1]];
+          displayTexts = [texts[0] || '', texts[1] || '', texts[0] || '', texts[1] || ''];
+        }
+
+        const totalDuration = displayImages.length * PHOTO_DURATION;
+        const totalFrames = Math.ceil(totalDuration * FPS);
+        
+        // Setup Media Stream and Recorder
+        audio = new Audio();
         audio.crossOrigin = "anonymous";
-        // We use AudioContext to capture the stream reliably
-        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        audio.src = song?.url || '';
         
-        // Ensure context is running (browsers block auto-play audio context)
-        if (audioCtx.state === 'suspended') {
-          await audioCtx.resume();
+        const stream = canvas.captureStream(FPS);
+
+        try {
+          audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+          const dest = audioCtx.createMediaStreamDestination();
+          
+          let audioTrackMatched = false;
+          
+          // Handle audio errors and loading gracefully
+          await new Promise<void>((resolve) => {
+            const timeout = setTimeout(() => {
+               console.warn("Audio load timed out, proceeding without audio.");
+               resolve();
+            }, 3000);
+
+            audio.oncanplaythrough = () => {
+              clearTimeout(timeout);
+              try {
+                if (audioCtx && audioCtx.state !== 'closed') {
+                  const source = audioCtx.createMediaElementSource(audio);
+                  source.connect(dest);
+                  source.connect(audioCtx.destination);
+                  audioTrackMatched = true;
+                }
+              } catch (e) {
+                console.warn("Could not connect audio source:", e);
+              }
+              resolve();
+            };
+
+            audio.onerror = () => {
+              clearTimeout(timeout);
+              console.warn("Audio failed to load, exporting without audio.");
+              resolve();
+            };
+            
+            if (!song?.url) resolve();
+          });
+          
+          if (isCancelled) return;
+
+          const audioTracks = audioTrackMatched ? dest.stream.getAudioTracks() : [];
+          combinedStream = new MediaStream([
+            ...stream.getVideoTracks(),
+            ...audioTracks
+          ]);
+        } catch (audioErr) {
+          console.warn("Audio recording setup failed, falling back to video only:", audioErr);
+          combinedStream = new MediaStream([...stream.getVideoTracks()]);
         }
 
-        const source = audioCtx.createMediaElementSource(audio);
-        const destination = audioCtx.createMediaStreamDestination();
-        source.connect(destination);
-        // source.connect(audioCtx.destination); // Play locally if needed, but we just need it for destination
+        const mimeTypes = [
+          'video/mp4',
+          'video/webm;codecs=vp9,opus',
+          'video/webm;codecs=vp8,opus',
+          'video/webm',
+        ];
+        const mimeType = mimeTypes.find(type => MediaRecorder.isTypeSupported(type)) || 'video/webm';
         
-        audioStream = destination.stream;
-        
-        if (song.startOffset) {
-          audio.currentTime = song.startOffset;
-        }
-        audioRef.current = audio;
-        
-        // Wait for audio to be ready
-        await new Promise((resolve) => {
-          audio.oncanplaythrough = resolve;
-          audio.load();
+        console.log(`Using MIME type: ${mimeType}`);
+        const recorder = new MediaRecorder(combinedStream, { 
+          mimeType, 
+          videoBitsPerSecond: 6000000 
         });
-
-        audio.play().catch(e => {
-          if (e.name !== 'AbortError') {
-            console.error("Video export audio playback failed", e);
+        recorderRef.current = recorder;
+        const chunks: Blob[] = [];
+        recorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) chunks.push(e.data);
+        };
+        recorder.onerror = (e) => {
+          console.error("MediaRecorder error:", e);
+          setStatus('error');
+        };
+        recorder.onstop = () => {
+          console.log("Recorder stopped. Chunks collected:", chunks.length);
+          if (isCancelled) {
+            chunks.length = 0;
+            return;
           }
-        });
+
+          try {
+            const blob = new Blob(chunks, { type: mimeType });
+            chunks.length = 0; 
+            
+            if (blob.size === 0) {
+              console.error("Recorded blob is empty.");
+              setStatus('error');
+              return;
+            }
+
+            console.log(`Final Blob size: ${(blob.size / (1024 * 1024)).toFixed(2)} MB`);
+            const url = URL.createObjectURL(blob);
+            const videoExt = mimeType.includes('mp4') ? 'mp4' : 'webm';
+            setExtension(videoExt);
+            setVideoUrl(url);
+            setStatus('done');
+            if (onReady) onReady(url);
+            
+            // AUTOMATIC DOWNLOAD - Triggered immediately upon completion
+            handleDownload(url, videoExt);
+            
+            // If headless, we're done immediately after triggering download
+            if (headless) {
+              onComplete();
+            }
+          } catch (err) {
+            console.error("Finalization failed:", err);
+            setStatus('error');
+          }
+        };
+
+        // Gradients
+        const gradTop = ctx.createLinearGradient(0, 0, 0, 400);
+        gradTop.addColorStop(0, 'rgba(0,0,0,0.7)');
+        gradTop.addColorStop(1, 'rgba(0,0,0,0)');
+        const gradBot = ctx.createLinearGradient(0, HEIGHT - 500, 0, HEIGHT);
+        gradBot.addColorStop(0, 'rgba(0,0,0,0)');
+        gradBot.addColorStop(1, 'rgba(0,0,0,0.8)');
+
+        // Start playback and recording
+        try {
+          if (audio) await audio.play();
+        } catch (playError) {
+          console.warn("Autoplay blocked or audio error.", playError);
+        }
+        
+        if (isCancelled) {
+          if (audio) audio.pause();
+          return;
+        }
+
+        // Start recording with timeslice
+        recorder.start(200);
+        setStatus('processing');
+
+        let currentFrame = 0;
+        
+        const renderLoop = () => {
+          if (isCancelled) return;
+
+          if (currentFrame >= totalFrames) {
+            console.log("Rendering complete, stopping recorder.");
+            if (recorder.state !== 'inactive') recorder.stop();
+            return;
+          }
+
+          const elapsed = currentFrame / FPS;
+          const currentProgress = (elapsed / totalDuration) * 100;
+          setProgress(currentProgress);
+          if (onProgress) onProgress(currentProgress);
+
+          const photoIndex = Math.floor(elapsed / PHOTO_DURATION);
+          const photoElapsed = elapsed % PHOTO_DURATION;
+          const currentImg = displayImages[photoIndex % displayImages.length];
+          const nextImg = displayImages[(photoIndex + 1) % displayImages.length];
+
+          ctx.fillStyle = '#100c08';
+          ctx.fillRect(0, 0, WIDTH, HEIGHT);
+          
+          const zoomSpeed = 0.12;
+          const isZoomIn = photoIndex % 2 === 0;
+          const zoom = isZoomIn ? 1.0 + (zoomSpeed * (photoElapsed / PHOTO_DURATION)) : (1.0 + zoomSpeed) - (zoomSpeed * (photoElapsed / PHOTO_DURATION));
+          
+          const panProgress = (photoElapsed / PHOTO_DURATION);
+          const panX = isZoomIn ? panProgress * 15 - 7.5 : (1 - panProgress) * 15 - 7.5;
+          const panY = isZoomIn ? (1 - panProgress) * 8 - 4 : panProgress * 8 - 4;
+
+          ctx.save();
+          if (photoElapsed > PHOTO_DURATION - 0.8) {
+            ctx.globalAlpha = 1 - (photoElapsed - (PHOTO_DURATION - 0.8)) / 0.8;
+          }
+          drawCoverImage(ctx, currentImg, zoom, panX, panY);
+          ctx.restore();
+
+          if (photoElapsed > PHOTO_DURATION - 0.8) {
+            const alpha = (photoElapsed - (PHOTO_DURATION - 0.8)) / 0.8;
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            drawCoverImage(ctx, nextImg, isZoomIn ? (1.0 + zoomSpeed) : 1.0, isZoomIn ? 7.5 : -7.5, isZoomIn ? -4 : 4);
+            ctx.restore();
+          }
+
+          ctx.fillStyle = gradTop; ctx.fillRect(0, 0, WIDTH, 400);
+          ctx.fillStyle = gradBot; ctx.fillRect(0, HEIGHT - 500, WIDTH, 500);
+
+          const currentText = displayTexts[photoIndex % displayTexts.length];
+          const style = TEXT_STYLES_DATA[photoIndex % TEXT_STYLES_DATA.length];
+          const maxWidth = WIDTH - 160;
+          
+          ctx.font = aesthetic === 'modern_chic' ? '700 50px sans-serif' : 'italic 50px serif';
+          const lines = wrapText(ctx, currentText, maxWidth);
+          const lineHeight = 60;
+          const totalTextHeight = lines.length * lineHeight;
+          
+          const totalChars = currentText.length;
+          const textStartTime = 0.3;
+          const textDuration = 1.5;
+          const charsToShow = Math.floor(Math.max(0, Math.min(1, (photoElapsed - textStartTime) / textDuration)) * totalChars);
+          
+          ctx.fillStyle = '#D4AF37'; 
+          ctx.textAlign = style.align as CanvasTextAlign;
+          ctx.font = 'bold 20px sans-serif'; 
+          ctx.letterSpacing = '8px';
+          
+          const labelY = style.y - (lines.length > 1 ? (totalTextHeight / 2 + 40) : 60);
+          ctx.fillText(style.label, (style.x || WIDTH / 2), labelY);
+          
+          ctx.font = aesthetic === 'modern_chic' ? '700 50px sans-serif' : 'italic 50px serif';
+          ctx.letterSpacing = 'normal';
+          
+          let charCounter = 0;
+          lines.forEach((line, index) => {
+            const lineY = style.y + (index * lineHeight) - (lines.length > 1 ? (totalTextHeight / 2 - lineHeight / 2) : 0);
+            
+            if (charCounter < charsToShow) {
+              const lineChars = Math.min(line.length, charsToShow - charCounter);
+              ctx.fillText(line.substring(0, lineChars), (style.x || WIDTH / 2), lineY);
+            }
+            charCounter += line.length + 1;
+          });
+
+          if (showWatermark) {
+            ctx.font = 'bold 16px sans-serif'; 
+            ctx.fillStyle = 'rgba(255,255,255,0.4)';
+            ctx.textAlign = 'center'; 
+            ctx.fillText(brandName.toUpperCase(), WIDTH / 2, HEIGHT - 80);
+          }
+
+          currentFrame++;
+          animationFrameId = requestAnimationFrame(renderLoop);
+        };
+
+        animationFrameId = requestAnimationFrame(renderLoop);
       } catch (e) {
-        console.error("Audio capture failed", e);
-      }
-    }
-
-    // 2. Prepare Recorder
-    const canvasStream = canvas.captureStream(FPS);
-    const tracks = [...canvasStream.getVideoTracks()];
-    if (audioStream) {
-      tracks.push(...audioStream.getAudioTracks());
-    }
-    const combinedStream = new MediaStream(tracks);
-
-    // Try multiple mime types for better compatibility
-    const mimeTypes = [
-      'video/webm;codecs=vp9,opus',
-      'video/webm;codecs=vp8,opus',
-      'video/webm',
-      'video/mp4'
-    ];
-    let selectedMimeType = '';
-    let selectedExt = 'webm';
-    for (const type of mimeTypes) {
-      if (MediaRecorder.isTypeSupported(type)) {
-        selectedMimeType = type;
-        selectedExt = type.includes('mp4') ? 'mp4' : 'webm';
-        break;
-      }
-    }
-    setExtension(selectedExt);
-
-    const recorder = new MediaRecorder(combinedStream, {
-      mimeType: selectedMimeType,
-      videoBitsPerSecond: 12000000 // 12Mbps for premium fidelity
-    });
-
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) {
-        chunksRef.current.push(e.data);
+        console.error("Export process failed:", e);
+        if (!isCancelled) setStatus('error');
       }
     };
 
-    recorder.onstop = () => {
-      const blob = new Blob(chunksRef.current, { type: 'video/webm' });
-      const url = URL.createObjectURL(blob);
-      setVideoUrl(url);
-      setStatus('done');
+    processExport();
+
+    return () => {
+      console.log("Cleaning up VideoExporter resources...");
+      isCancelled = true;
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
       
-      // Stop audio if it was playing for export
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.remove();
-        audioRef.current = null;
+      // Stop audio
+      if (audio) {
+        audio.pause();
+        audio.src = '';
+        audio.load();
       }
+
+      // Close AudioContext
+      if (audioCtx && audioCtx.state !== 'closed') {
+        audioCtx.close().catch(console.error);
+      }
+
+      // Stop all tracks
+      if (combinedStream) {
+        combinedStream.getTracks().forEach(t => t.stop());
+      }
+
+      // Stop recorder
+      if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+        try {
+          recorderRef.current.stop();
+        } catch (e) {
+          console.warn("Recorder stop failed during cleanup:", e);
+        }
+      }
+
+      // Revoke any created URLs if status is not 'done'
+      // We keep it if 'done' so the manual download button works, 
+      // but App.tsx will eventually clear it.
     };
+  }, []);
 
-    recorderRef.current = recorder;
-    recorder.start();
-
-    // 3. Render Loop
-    const images: HTMLImageElement[] = await Promise.all(
-      photos.map(p => new Promise<HTMLImageElement>((resolve) => {
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.src = p.url;
-        img.onload = () => resolve(img);
-      }))
-    );
-
-    // Ensure minimum 10 seconds (roughly 4 segments of 3s each)
-    let displayImages = images;
-    let displayTexts = texts;
-    
-    if (images.length === 1) {
-      displayImages = [images[0], images[0], images[0], images[0]];
-      displayTexts = [texts[0] || '', texts[0] || '', texts[0] || '', texts[0] || ''];
-    } else if (images.length === 2) {
-      displayImages = [images[0], images[1], images[0], images[1]];
-      displayTexts = [texts[0] || '', texts[1] || '', texts[0] || '', texts[1] || ''];
-    } else if (images.length === 3) {
-      displayImages = [images[0], images[1], images[2], images[0]];
-      displayTexts = [texts[0] || '', texts[1] || '', texts[2] || '', texts[0] || ''];
-    }
-
-    const totalDuration = displayImages.length * PHOTO_DURATION;
-    let startTime = performance.now();
-
-    const render = (now: number) => {
-      const elapsed = (now - startTime) / 1000;
-      const currentProgress = (elapsed / totalDuration) * 100;
-      setProgress(currentProgress);
-
-      if (elapsed >= totalDuration) {
-        recorder.stop();
-        setStatus('finalizing');
-        return;
-      }
-
-      const photoIndex = Math.floor(elapsed / PHOTO_DURATION);
-      const photoElapsed = elapsed % PHOTO_DURATION;
-      const currentImg = displayImages[photoIndex];
-      const nextImg = displayImages[(photoIndex + 1) % displayImages.length];
-      
-      // Transition type logic
-      const activeTransition = transitionType === 'auto' ? (photoIndex % 9) : (transitionType % 9);
-
-      // Clear
-      ctx.fillStyle = '#100c08'; // Rich charcoal
-      ctx.fillRect(0, 0, WIDTH, HEIGHT);
-
-      // Draw current photo with dynamic Ken Burns
-      const movement = (photoIndex % 2 === 0) ? 1.0 : 1.1;
-      const zoom = movement + (photoIndex % 2 === 0 ? 0.1 : -0.1) * (photoElapsed / PHOTO_DURATION);
-      
-      ctx.save();
-
-      // Subtle camera shake for zoom transitions
-      if (activeTransition === 0 || activeTransition === 4) {
-        const shakeX = Math.sin(elapsed * 10) * 4;
-        const shakeY = Math.cos(elapsed * 8) * 3;
-        ctx.translate(shakeX, shakeY);
-      }
-
-      // Handle exit transition for current photo
-      if (photoElapsed > PHOTO_DURATION - 1) {
-        const exitAlpha = 1 - (photoElapsed - (PHOTO_DURATION - 1));
-        const blurValue = (1 - exitAlpha) * 20;
-        
-        if (activeTransition === 2) { // Slide Left Out
-          const offset = (1 - exitAlpha) * WIDTH;
-          ctx.translate(-offset, 0);
-          ctx.filter = `blur(${blurValue}px)`;
-        } else if (activeTransition === 3) { // Slide Down Out
-          const offset = (1 - exitAlpha) * HEIGHT;
-          ctx.translate(0, offset);
-          ctx.filter = `blur(${blurValue}px)`;
-        } else if (activeTransition === 6) { // Slide Right Out
-          const offset = (1 - exitAlpha) * WIDTH;
-          ctx.translate(offset, 0);
-          ctx.filter = `blur(${blurValue}px)`;
-        } else if (activeTransition === 7) { // Slide Up Out
-          const offset = (1 - exitAlpha) * HEIGHT;
-          ctx.translate(0, -offset);
-          ctx.filter = `blur(${blurValue}px)`;
-        } else if (activeTransition === 1 || activeTransition === 0) { // Classic Fade or cinematic zoom fade
-          ctx.globalAlpha = exitAlpha;
-        }
-      }
-      drawCoverImage(ctx, currentImg, zoom * 1.02); // 2% overscan for shake safety
-      ctx.filter = 'none'; // Reset filter after drawing current image
-
-      // Draw Light Glint Shimmer (Branded Luxury Feel)
-      ctx.save();
-      const shimmerOffset = (photoElapsed / PHOTO_DURATION * 3 - 1) * WIDTH;
-      const shimmerGrad = ctx.createLinearGradient(shimmerOffset, 0, shimmerOffset + 400, HEIGHT);
-      shimmerGrad.addColorStop(0, 'rgba(255,255,255,0)');
-      shimmerGrad.addColorStop(0.5, 'rgba(255,255,255,0.08)');
-      shimmerGrad.addColorStop(1, 'rgba(255,255,255,0)');
-      ctx.fillStyle = shimmerGrad;
-      ctx.globalCompositeOperation = 'overlay';
-      ctx.translate(WIDTH/2, HEIGHT/2);
-      ctx.rotate(0.2);
-      ctx.translate(-WIDTH/2, -HEIGHT/2);
-      ctx.fillRect(-WIDTH, 0, WIDTH * 3, HEIGHT);
-      ctx.restore();
-
-      ctx.restore();
-
-      // Transition handling for incoming photo
-      if (photoElapsed > PHOTO_DURATION - 1) {
-        const alpha = photoElapsed - (PHOTO_DURATION - 1);
-        const blurValue = (1 - alpha) * 20;
-        ctx.save();
-        if (activeTransition === 0) { // Cinematic Zoom
-          ctx.globalAlpha = alpha;
-          const scale = (0.9 + alpha * 0.1) * 1.02;
-          drawCoverImage(ctx, nextImg, scale);
-        } else if (activeTransition === 1) { // Classic Fade
-          ctx.globalAlpha = alpha;
-          drawCoverImage(ctx, nextImg, 1.02);
-        } else if (activeTransition === 2) { // Slide Left In
-          const offset = (1 - alpha) * WIDTH;
-          ctx.translate(offset, 0);
-          ctx.filter = `blur(${blurValue}px)`;
-          drawCoverImage(ctx, nextImg, 1.02);
-        } else if (activeTransition === 3) { // Slide Down In
-          const offset = (1 - alpha) * HEIGHT;
-          ctx.translate(0, -offset);
-          ctx.filter = `blur(${blurValue}px)`;
-          drawCoverImage(ctx, nextImg, 1.02);
-        } else if (activeTransition === 4) { // Soft Zoom In (renamed from index 3)
-          ctx.globalAlpha = alpha;
-          const scale = (0.9 + alpha * 0.1) * 1.02;
-          drawCoverImage(ctx, nextImg, scale);
-        } else if (activeTransition === 5) { // Rotate In
-          ctx.globalAlpha = alpha;
-          const rotation = (1 - alpha) * 0.1;
-          const scale = (0.9 + alpha * 0.1) * 1.02;
-          ctx.translate(WIDTH/2, HEIGHT/2);
-          ctx.rotate(rotation);
-          ctx.translate(-WIDTH/2, -HEIGHT/2);
-          drawCoverImage(ctx, nextImg, scale);
-        } else if (activeTransition === 6) { // Slide Right In
-          const offset = (1 - alpha) * WIDTH;
-          ctx.translate(-offset, 0);
-          ctx.filter = `blur(${blurValue}px)`;
-          drawCoverImage(ctx, nextImg, 1.02);
-        } else if (activeTransition === 7) { // Slide Up In
-          const offset = (1 - alpha) * HEIGHT;
-          ctx.translate(0, offset);
-          ctx.filter = `blur(${blurValue}px)`;
-          drawCoverImage(ctx, nextImg, 1.02);
-        } else { // Diagonal In (index 8)
-          const offsetX = (1 - alpha) * WIDTH * 0.5;
-          const offsetY = (1 - alpha) * HEIGHT * 0.5;
-          ctx.translate(offsetX, offsetY);
-          ctx.globalAlpha = alpha;
-          ctx.filter = `blur(${(1-alpha)*8}px)`;
-          drawCoverImage(ctx, nextImg, 1.02);
-        }
-        ctx.restore();
-        ctx.globalAlpha = 1.0;
-      }
-
-      // Draw Overlays (Cinematic Grade)
-      const gradTop = ctx.createLinearGradient(0, 0, 0, 400);
-      gradTop.addColorStop(0, aesthetic === 'modern_chic' ? 'rgba(0,0,0,0)' : 'rgba(0,0,0,0.8)');
-      gradTop.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = gradTop;
-      ctx.fillRect(0, 0, WIDTH, 400);
-
-      const gradBot = ctx.createLinearGradient(0, HEIGHT - 500, 0, HEIGHT);
-      gradBot.addColorStop(0, 'rgba(0,0,0,0)');
-      gradBot.addColorStop(1, aesthetic === 'modern_chic' ? 'rgba(16,12,8,0.2)' : 'rgba(16,12,8,0.9)');
-      ctx.fillStyle = gradBot;
-      ctx.fillRect(0, HEIGHT - 500, WIDTH, 500);
-
-      // Artistic Noise/Grain simulation
-      if (aesthetic !== 'modern_chic') {
-        ctx.fillStyle = 'rgba(255,255,255,0.03)';
-        for(let i=0; i<100; i++) {
-          ctx.fillRect(Math.random()*WIDTH, Math.random()*HEIGHT, 2, 2);
-        }
-      }
-
-      // Cinematic Light Leak simulation
-      if (aesthetic === 'vintage_cinema' || aesthetic === 'temple_aura') {
-        const leakTime = elapsed / totalDuration;
-        const leakX = WIDTH * (0.5 + Math.cos(leakTime * 2) * 0.5);
-        const leakY = HEIGHT * (0.5 + Math.sin(leakTime * 3) * 0.5);
-        const leakGrad = ctx.createRadialGradient(leakX, leakY, 0, leakX, leakY, WIDTH * 1.5);
-        leakGrad.addColorStop(0, 'rgba(255, 100, 50, 0.15)');
-        leakGrad.addColorStop(0.5, 'rgba(255, 200, 100, 0.05)');
-        leakGrad.addColorStop(1, 'transparent');
-        ctx.fillStyle = leakGrad;
-        ctx.globalCompositeOperation = 'color-dodge';
-        ctx.fillRect(0, 0, WIDTH, HEIGHT);
-        ctx.globalCompositeOperation = 'source-over';
-      }
-
-      // Special Aesthetic Overlays
-      if (aesthetic === 'royal_palace') {
-        const goldGrad = ctx.createRadialGradient(WIDTH/2, HEIGHT/2, 0, WIDTH/2, HEIGHT/2, WIDTH);
-        goldGrad.addColorStop(0, 'transparent');
-        goldGrad.addColorStop(1, 'rgba(212, 175, 55, 0.15)');
-        ctx.fillStyle = goldGrad;
-        ctx.fillRect(0, 0, WIDTH, HEIGHT);
-      } else if (aesthetic === 'temple_aura') {
-        const divineGrad = ctx.createLinearGradient(0, 0, 0, HEIGHT/2);
-        divineGrad.addColorStop(0, 'rgba(255, 200, 100, 0.12)');
-        divineGrad.addColorStop(1, 'transparent');
-        ctx.fillStyle = divineGrad;
-        ctx.fillRect(0, 0, WIDTH, HEIGHT);
-        
-        ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-        ctx.lineWidth = 150;
-        ctx.strokeRect(0, 0, WIDTH, HEIGHT);
-      } else if (aesthetic === 'modern_chic') {
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 40;
-        ctx.strokeRect(20, 20, WIDTH - 40, HEIGHT - 40);
-      }
-
-      // Draw Text with Typewriter Effect
-      const currentText = displayTexts[photoIndex % displayTexts.length];
-      const charsToShow = Math.floor(Math.min(1, (photoElapsed - 0.6) / (currentText.length * 0.05 + 0.1)) * currentText.length);
-      const textToDraw = currentText.substring(0, Math.max(0, charsToShow));
-      
-      const TEXT_STYLES_DATA = [
-        { label: "THE COLLECTION", align: 'center', y: HEIGHT - 360 },
-        { label: "HERITAGE", align: 'left', x: 120, y: HEIGHT - 360 },
-        { label: "SIGNATURE", align: 'left', x: 120, y: 390 },
-        { label: "TIMELESS SILK", align: 'center', y: HEIGHT - 510 },
-        { label: "ETHEREAL", align: 'center', y: 690 },
-        { label: "CRAFTMANSHIP", align: 'right', x: WIDTH - 120, y: HEIGHT - 660 },
-        { label: "ARTISTRY", align: 'center', y: HEIGHT / 3 + 90 },
-        { label: "BRIDE'S CHOICE", align: 'left', x: 150, y: HEIGHT * 0.75 + 15 }
-      ];
-
-      const style = TEXT_STYLES_DATA[photoIndex % TEXT_STYLES_DATA.length];
-      
-      ctx.shadowColor = 'rgba(0,0,0,0.8)';
-      ctx.shadowBlur = 30;
-      ctx.fillStyle = '#D4AF37'; // saree-gold
-      ctx.textAlign = style.align as CanvasTextAlign;
-      
-      // Secondary text (Sub-label)
-      ctx.font = 'bold 30px sans-serif';
-      ctx.letterSpacing = '15px';
-      
-      let textX = style.x || WIDTH / 2;
-      let textY = style.y;
-
-      // Draw Sub-label
-      ctx.fillText(style.label, textX, textY - 90);
-
-      // Draw Main Text
-      if (aesthetic === 'modern_chic') {
-        ctx.font = '700 80px sans-serif';
-        ctx.fillText(textToDraw.toUpperCase(), textX, textY);
-      } else {
-        ctx.font = 'italic 80px serif';
-        ctx.fillText(textToDraw, textX, textY);
-      }
-
-      // Draw Brand Watermark
-      if (showWatermark) {
-        ctx.font = 'bold 28px sans-serif';
-        ctx.fillStyle = 'rgba(255,255,255,0.4)';
-        ctx.textAlign = 'center';
-        ctx.fillText(brandName.toUpperCase(), WIDTH / 2, HEIGHT - 120);
-        ctx.letterSpacing = '12px';
-      }
-
-      // Draw elegant accent line
-      ctx.strokeStyle = 'rgba(212, 175, 55, 0.6)';
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      if (style.align === 'center') {
-        ctx.moveTo(textX - 90, textY + 60);
-        ctx.lineTo(textX + 90, textY + 60);
-      } else if (style.align === 'left') {
-        ctx.moveTo(textX, textY + 60);
-        ctx.lineTo(textX + 180, textY + 60);
-      } else {
-        ctx.moveTo(textX - 180, textY + 60);
-        ctx.lineTo(textX, textY + 60);
-      }
-      ctx.stroke();
-
-      requestAnimationFrame(render);
-    };
-
-    requestAnimationFrame(render);
-  }
-
-  function drawCoverImage(ctx: CanvasRenderingContext2D, img: HTMLImageElement, scale: number) {
+  function drawCoverImage(ctx: CanvasRenderingContext2D, img: HTMLImageElement, scale: number, offsetX: number = 0, offsetY: number = 0) {
     const imgRatio = img.width / img.height;
     const canvasRatio = WIDTH / HEIGHT;
-    let drawWidth, drawHeight, offsetX, offsetY;
-
-    if (imgRatio > canvasRatio) {
-      drawHeight = HEIGHT;
-      drawWidth = HEIGHT * imgRatio;
-      offsetX = (WIDTH - drawWidth) / 2;
-      offsetY = 0;
-    } else {
-      drawWidth = WIDTH;
-      drawHeight = WIDTH / imgRatio;
-      offsetX = 0;
-      offsetY = (HEIGHT - drawHeight) / 2;
-    }
-
-    // Apply scale for Ken Burns effect
-    const sw = drawWidth * scale;
-    const sh = drawHeight * scale;
-    const soX = offsetX - (sw - drawWidth) / 2;
-    const soY = offsetY - (sh - drawHeight) / 2;
-
-    ctx.drawImage(img, soX, soY, sw, sh);
+    let dw, dh, ox, oy;
+    if (imgRatio > canvasRatio) { dh = HEIGHT; dw = HEIGHT * imgRatio; ox = (WIDTH - dw) / 2; oy = 0; }
+    else { dw = WIDTH; dh = WIDTH / imgRatio; ox = 0; oy = (HEIGHT - dh) / 2; }
+    const sw = dw * scale; const sh = dh * scale;
+    const sx = ox - (sw - dw) / 2 + offsetX; const sy = oy - (sh - dh) / 2 + offsetY;
+    ctx.drawImage(img, sx, sy, sw, sh);
   }
 
-  const downloadVideo = () => {
-    if (!videoUrl) return;
-    const a = document.createElement('a');
-    a.href = videoUrl;
-    a.download = `kanchipuram-reel-${Date.now()}.${extension}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    onComplete();
+  const handleDownload = (targetUrl: string, targetExt: string) => {
+    if (!targetUrl) return;
+    try {
+      const a = document.createElement('a');
+      a.href = targetUrl;
+      const timestamp = new Date().getTime();
+      a.download = `nivra_reel_${timestamp}.${targetExt}`;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        if (document.body.contains(a)) document.body.removeChild(a);
+      }, 500);
+      console.log("Download triggered.");
+    } catch (err) {
+      console.error("Download fail:", err);
+      window.open(targetUrl, '_blank');
+    }
   };
 
   return (
-    <div className="flex flex-col items-center justify-center p-8 space-y-8 max-w-lg mx-auto text-center min-h-[60vh]">
-      <canvas 
-        ref={canvasRef} 
-        width={WIDTH} 
-        height={HEIGHT} 
-        className="hidden" // Hidden from view, just for recording
-      />
-
-      <div className="relative">
-        <div className="w-32 h-32 rounded-full border-4 border-saree-gold/20 flex items-center justify-center">
-          {status === 'done' ? (
-            <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }}>
-              <CheckCircle2 className="w-16 h-16 text-saree-gold" />
-            </motion.div>
-          ) : (
-            <Loader2 className="w-12 h-12 text-saree-gold animate-spin" />
-          )}
-        </div>
+    <div className={headless ? "hidden" : "fixed inset-0 z-[200] flex items-center justify-center p-6 bg-stone-950/90 backdrop-blur-xl"}>
+      <div className={headless ? "hidden" : "flex flex-col items-center justify-center p-8 space-y-8 max-w-lg w-full text-center bg-stone-900/40 rounded-3xl border border-stone-800 shadow-2xl relative overflow-hidden backdrop-blur-md"}>
+        {/* Progress bar at bottom */}
         {status !== 'done' && (
-          <motion.div 
-            className="absolute inset-0 flex items-center justify-center"
-            animate={{ opacity: [0.4, 1, 0.4] }}
-            transition={{ repeat: Infinity, duration: 2 }}
-          >
-            <Film className="w-6 h-6 text-saree-maroon" />
-          </motion.div>
+          <div 
+            className="absolute bottom-0 left-0 h-1.5 bg-saree-gold transition-all duration-300" 
+            style={{ width: `${progress}%` }} 
+          />
         )}
-      </div>
+        
+        <canvas ref={canvasRef} width={WIDTH} height={HEIGHT} className="fixed -left-[9999px] pointer-events-none opacity-0" />
+        
+        <div className="w-full flex flex-col items-center space-y-6">
+          <div className="w-40 h-40 rounded-full border-4 border-saree-gold/20 flex items-center justify-center relative">
+            {status === 'error' ? (
+              <AlertCircle className="w-16 h-16 text-red-500" />
+            ) : status === 'done' ? (
+              <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }}>
+                <CheckCircle2 className="w-16 h-16 text-saree-gold" />
+              </motion.div>
+            ) : (
+              <div className="relative flex items-center justify-center">
+                <Loader2 className="w-16 h-16 text-saree-gold animate-spin" />
+                <div className="absolute inset-0 flex items-center justify-center text-xs font-bold text-saree-gold">
+                  {Math.round(progress)}%
+                </div>
+              </div>
+            )}
+          </div>
 
-      <div className="space-y-3">
-        <h3 className="text-3xl display-text font-medium text-saree-maroon lowercase">
-          {status === 'recording' ? 'Crafting your masterpiece...' : 
-           status === 'finalizing' ? 'Finalizing textures...' : 
-           'Heirloom Ready'}
-        </h3>
-        <p className="text-sm text-gray-500 max-w-xs mx-auto">
-          {status === 'recording' ? 'Weaving your photos and music into a cinematic narrative.' : 
-           status === 'done' ? 'Your premium silk reel is ready for your collection.' :
-           'Preparing the digital loom...'}
-        </p>
-      </div>
+          <div className="space-y-2">
+            <h3 className="text-2xl display-text text-white">
+              {status === 'loading' && 'Preparing Assets...'}
+              {status === 'processing' && 'Rendering Reel...'}
+              {status === 'finalizing' && 'Finalizing...'}
+              {status === 'done' && 'Masterpiece Ready!'}
+              {status === 'error' && 'Failed to Export'}
+            </h3>
+            <p className="text-stone-400 text-sm italic serif-text max-w-xs mx-auto">
+              {status === 'processing' && 'Meticulously crafting every frame with heritage techniques.'}
+              {status === 'done' && 'Your heritage reel is ready to shine.'}
+              {status === 'error' && 'Something went wrong during the curation process.'}
+            </p>
+          </div>
 
-      <div className="w-full bg-saree-gold/10 h-2 rounded-full overflow-hidden">
-        <motion.div 
-          className="h-full bg-saree-maroon"
-          initial={{ width: 0 }}
-          animate={{ width: `${progress}%` }}
-          transition={{ duration: 0.5 }}
-        />
-      </div>
-
-      {status === 'done' && (
-        <motion.div 
-          initial={{ y: 20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          className="flex flex-col items-center gap-4"
-        >
-          <button 
-            onClick={downloadVideo}
-            className="px-12 py-5 rounded-full bg-saree-maroon text-white font-bold shadow-2xl hover:bg-saree-maroon/90 active:scale-95 transition-all flex items-center gap-3 text-lg"
-          >
-            <Download className="w-6 h-6" />
-            Download Movie
-          </button>
-          <button 
-            onClick={onComplete}
-            className="text-saree-gold font-bold uppercase tracking-widest text-xs hover:underline"
-          >
-            Back to Studio
-          </button>
-        </motion.div>
-      )}
-
-      <div className="flex items-center gap-2 text-[10px] text-gray-400 uppercase tracking-widest font-bold">
-        <Sparkles className="w-3 h-3 text-saree-gold" />
-        High fidelity render engine active
+          <div className="flex flex-col gap-4 w-full">
+            {status === 'done' && videoUrl && (
+              <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
+                <div className="aspect-[9/16] w-full max-w-[240px] mx-auto rounded-3xl overflow-hidden border-2 border-saree-gold/30 shadow-2xl bg-stone-950 ring-4 ring-saree-gold/10 relative">
+                  <video 
+                    src={videoUrl} 
+                    controls 
+                    playsInline
+                    className="w-full h-full object-cover"
+                    autoPlay
+                    loop
+                  />
+                </div>
+                
+                <div className="space-y-4">
+                  <div className="p-4 bg-white/5 rounded-xl border border-white/5">
+                    <p className="text-[11px] text-stone-400 font-medium uppercase tracking-[0.2em] mb-2">Reel Generated Successfully</p>
+                    <p className="text-[10px] text-stone-500 italic">
+                      The download was triggered automatically. If it didn't start, please long-press the video above to save it to your library.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {status === 'error' && (
+              <motion.button 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                onClick={() => window.location.reload()}
+                className="w-full py-5 bg-white/10 text-white rounded-2xl font-bold uppercase tracking-widest flex items-center justify-center gap-3 border border-white/20"
+              >
+                <RefreshCcw className="w-6 h-6" /> Restart App
+              </motion.button>
+            )}
+            
+            <button 
+              onClick={() => onComplete()} 
+              className={`w-full py-4 text-stone-500 text-sm font-bold uppercase tracking-widest hover:text-white transition-colors border-stone-800 ${status === 'done' ? 'mt-4 border-t pt-8' : ''}`}
+            >
+              {status === 'done' ? 'Start Next Masterpiece' : 'Cancel Export'}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
-}
+};
+
+export default VideoExporter;

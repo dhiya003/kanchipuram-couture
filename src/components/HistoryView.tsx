@@ -1,5 +1,5 @@
 import { motion } from 'motion/react';
-import { History as HistoryIcon, Trash2, ArrowLeft, PlayCircle } from 'lucide-react';
+import { History as HistoryIcon, Trash2, ArrowLeft, PlayCircle, Download } from 'lucide-react';
 import { Reel } from '../types';
 
 interface HistoryViewProps {
@@ -7,9 +7,10 @@ interface HistoryViewProps {
   onBack: () => void;
   onSelectReel: (reel: Reel) => void;
   onDeleteReel: (id: string) => void;
+  onDownloadReel: (reel: Reel) => void;
 }
 
-export default function HistoryView({ history, onBack, onSelectReel, onDeleteReel }: HistoryViewProps) {
+export default function HistoryView({ history, onBack, onSelectReel, onDeleteReel, onDownloadReel }: HistoryViewProps) {
   return (
     <div className="w-full max-w-4xl mx-auto p-6 space-y-8">
       <div className="flex items-center justify-between border-b border-saree-gold/20 pb-6">
@@ -67,12 +68,20 @@ export default function HistoryView({ history, onBack, onSelectReel, onDeleteRee
                   </h4>
                 </div>
 
-                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-saree-ink/20 backdrop-blur-[2px]">
+                <div className="absolute inset-0 flex items-center justify-center gap-4 opacity-0 group-hover:opacity-100 transition-opacity bg-saree-ink/40 backdrop-blur-[2px]">
                   <button 
                     onClick={() => onSelectReel(reel)}
                     className="p-4 rounded-full bg-white text-saree-maroon shadow-2xl hover:scale-110 active:scale-95 transition-all"
+                    title="View Preview"
                   >
                     <PlayCircle className="w-8 h-8" />
+                  </button>
+                  <button 
+                    onClick={() => onDownloadReel(reel)}
+                    className="p-4 rounded-full bg-saree-gold text-white shadow-2xl hover:scale-110 active:scale-95 transition-all"
+                    title="Download Reel"
+                  >
+                    <Download className="w-8 h-8" />
                   </button>
                 </div>
               </div>

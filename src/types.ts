@@ -25,6 +25,8 @@ export interface Reel {
   createdAt: string;
   photos: Photo[];
   song?: Song;
+  texts?: string[];
+  aesthetic?: string;
   transitionType?: number | 'auto';
 }
 

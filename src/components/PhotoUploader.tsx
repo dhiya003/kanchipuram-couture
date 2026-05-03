@@ -29,11 +29,15 @@ export default function PhotoUploader({
     
     const newPhotos: Photo[] = Array.from(files).slice(0, maxPhotos - photos.length).map(file => ({
       id: Math.random().toString(36).substr(2, 9),
-      url: URL.createObjectURL(file), // Note: In a real app, you'd upload these to a server
+      url: URL.createObjectURL(file), 
       caption: ''
     }));
 
     onPhotosChange([...photos, ...newPhotos]);
+    
+    // Clear input so same files can be selected again if needed
+    const input = document.getElementById('photo-input') as HTMLInputElement;
+    if (input) input.value = '';
   }, [photos, onPhotosChange, maxPhotos]);
 
   const removePhoto = (id: string) => {
@@ -117,27 +121,6 @@ export default function PhotoUploader({
           Try adding at least 5 photos for a truly cinematic experience.
         </p>
       )}
-
-      {/* Brand Identity */}
-      <motion.div 
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="max-w-2xl mx-auto space-y-4 pt-8 border-t border-saree-gold/10"
-      >
-        <div className="flex items-center gap-3 text-saree-maroon">
-          <Upload className="w-5 h-5 rotate-180" />
-          <h4 className="display-text text-xl font-medium">Brand Identity</h4>
-        </div>
-        <div className="relative group">
-          <input
-            type="text"
-            value={brandName}
-            onChange={(e) => onBrandNameChange(e.target.value)}
-            placeholder="Store Name or Your Signature (e.g. SAREE HERITAGE)"
-            className="w-full p-6 rounded-2xl bg-white border border-saree-gold/20 focus:border-saree-gold focus:ring-1 focus:ring-saree-gold outline-none serif-text text-gray-700 transition-all shadow-sm"
-          />
-        </div>
-      </motion.div>
 
       {/* Creative Brief Textarea */}
       <motion.div 

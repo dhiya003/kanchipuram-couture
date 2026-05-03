@@ -6,6 +6,8 @@ import { motion, AnimatePresence } from 'motion/react';
 export const SOUTHERN_CLASSICS: Song[] = [
   { id: '1', title: 'Kannathil Muthamittal', artist: 'A.R. Rahman', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3', genre: 'Tamil Cinema Classic', album: 'Kannathil Muthamittal' },
   { id: '2', title: 'Rowdy Baby', artist: 'Dhanush & Dhee', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3', genre: 'Tamil Dance', album: 'Maari 2' },
+  { id: '11', title: 'Mental Manadhil', artist: 'A.R. Rahman', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3', genre: 'Tamil Pop', album: 'O Kadhal Kanmani' },
+  { id: '12', title: 'Aalaporaan Thamizhan', artist: 'A.R. Rahman', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3', genre: 'Tamil Anthem', album: 'Mersal' },
   { id: '4', title: 'Kanda Vara Sollunga', artist: 'Santhosh Narayanan', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3', genre: 'Tamil Folk', album: 'Karnan' },
   { id: '5', title: 'Malare', artist: 'Vijay Yesudas', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3', genre: 'Romantic Melody', album: 'Premam' },
   { id: '6', title: 'Verithanam', artist: 'A.R. Rahman', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3', genre: 'Tamil Mass', album: 'Bigil' },
@@ -25,15 +27,6 @@ export default function MusicSelector({ onSelect, selectedSong }: MusicSelectorP
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [audioError, setAudioError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  
-  useEffect(() => {
-    return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
-    };
-  }, []);
 
   const filteredSongs = SOUTHERN_CLASSICS.filter(s => 
     s.title.toLowerCase().includes(search.toLowerCase()) || 
@@ -51,14 +44,37 @@ export default function MusicSelector({ onSelect, selectedSong }: MusicSelectorP
       }
       setPlayingId(null);
     } else {
+      if (!song.url) {
+         setPlayingId(song.id);
+         setTimeout(() => setPlayingId(null), 2000);
+         return;
+      }
+
       try {
         if (audioRef.current) {
           audioRef.current.pause();
           audioRef.current = null;
         }
 
-        const audio = new Audio(song.url);
+        const audio = new Audio();
+        audio.crossOrigin = "anonymous";
+        
+        // Timeout check for preview
+        const checkLoad = new Promise<boolean>((resolve) => {
+          audio.oncanplay = () => resolve(true);
+          audio.onerror = () => resolve(false);
+          setTimeout(() => resolve(false), 3000);
+        });
+
+        audio.src = song.url;
         audioRef.current = audio;
+
+        const isOk = await checkLoad;
+        if (!isOk) {
+           setAudioError(`Could not load ${song.title}. Source might be blocked.`);
+           setPlayingId(null);
+           return;
+        }
 
         const startMark = (selectedSong?.id === song.id && selectedSong.startOffset) 
           ? selectedSong.startOffset 
@@ -71,8 +87,7 @@ export default function MusicSelector({ onSelect, selectedSong }: MusicSelectorP
           await audio.play();
         } catch (err: any) {
           if (err.name !== 'AbortError') {
-            console.error("Audio playback failed:", err);
-            setAudioError(`Could not play ${song.title}. Please try another song.`);
+            setAudioError(`Autoplay blocked. Click select to use this song.`);
             setPlayingId(null);
           }
           return;
@@ -89,19 +104,7 @@ export default function MusicSelector({ onSelect, selectedSong }: MusicSelectorP
           setPlayingId(null);
           clearTimeout(timeoutId);
         };
-
-        audio.onpause = () => {
-          clearTimeout(timeoutId);
-        };
-
-        audio.onerror = () => {
-          console.error("Failed to load audio source:", song.url);
-          setAudioError("Audio source unavailable. This may be due to a connection issue.");
-          setPlayingId(null);
-          clearTimeout(timeoutId);
-        };
       } catch (err) {
-        console.error("Error setting up audio:", err);
         setPlayingId(null);
       }
     }
