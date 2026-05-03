@@ -77,23 +77,54 @@ export default function MusicSelector({ onSelect, selectedSong }: MusicSelectorP
           audioRef.current = null;
         }
 
-        const audio = new Audio();
-        audio.crossOrigin = "anonymous";
+// Logic moved into the checkLoad promise
         
-        // Timeout check for preview
-        const checkLoad = new Promise<boolean>((resolve) => {
-          audio.oncanplay = () => resolve(true);
-          audio.onerror = () => {
-             // Fallback: try without crossOrigin for preview
-             audio.crossOrigin = null as any;
-             audio.src = song.url;
-             resolve(true);
-          };
-          setTimeout(() => resolve(false), 5000);
-        });
+        const checkLoad = new Promise<boolean>(async (resolve) => {
+          let resolved = false;
+          const timeout = setTimeout(() => {
+            if (!resolved) {
+              resolved = true;
+              resolve(false);
+            }
+          }, 15000);
 
-        audio.src = song.url;
-        audioRef.current = audio;
+          try {
+            // Fetch audio as blob to bypass simple origin restrictions
+            const response = await fetch(song.url);
+            if (!response.ok) throw new Error("Fetch failed");
+            
+            const blob = await response.blob();
+            const blobUrl = URL.createObjectURL(blob);
+            
+            const audio = new Audio();
+            audio.src = blobUrl;
+            audio.load();
+            
+            audio.oncanplaythrough = () => {
+              if (!resolved) {
+                resolved = true;
+                clearTimeout(timeout);
+                audioRef.current = audio;
+                resolve(true);
+              }
+            };
+
+            audio.onerror = () => {
+              if (!resolved) {
+                resolved = true;
+                clearTimeout(timeout);
+                resolve(false);
+              }
+            };
+          } catch (e) {
+            console.error("Music fetch failure:", e);
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(timeout);
+              resolve(false);
+            }
+          }
+        });
 
         const isOk = await checkLoad;
         if (!isOk) {
@@ -101,6 +132,9 @@ export default function MusicSelector({ onSelect, selectedSong }: MusicSelectorP
            setPlayingId(null);
            return;
         }
+
+        const audio = audioRef.current;
+        if (!audio) return;
 
         const startMark = (selectedSong?.id === song.id && selectedSong.startOffset) 
           ? selectedSong.startOffset 

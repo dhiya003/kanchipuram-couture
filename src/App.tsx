@@ -377,11 +377,11 @@ export default function App() {
             }}
             className="group relative flex items-center justify-center"
           >
-            <div className="w-12 h-12 rounded-2xl bg-saree-maroon flex items-center justify-center text-white shadow-xl group-hover:rotate-6 transition-transform group-active:scale-90">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-saree-maroon to-stone-900 flex items-center justify-center text-white shadow-xl group-hover:rotate-6 transition-transform group-active:scale-90 border border-saree-gold/20">
               <Crown className="w-6 h-6 text-saree-gold" />
             </div>
-            <div className="absolute -top-1 -right-1">
-              <Sparkles className="w-4 h-4 text-saree-gold animate-pulse" />
+            <div className="absolute -top-1 -right-1 bg-saree-gold rounded-full p-0.5 shadow-sm">
+              <Sparkles className="w-3 h-3 text-stone-950 animate-pulse" />
             </div>
           </button>
           <div>

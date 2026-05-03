@@ -88,6 +88,7 @@ const VideoExporter: React.FC<VideoExporterProps> = ({
   }
 
   const recorderRef = useRef<MediaRecorder | null>(null);
+  const videoBlobRef = useRef<Blob | null>(null);
 
   useEffect(() => {
     console.log("VideoExporter mounted. Starting processExport.");
@@ -245,6 +246,7 @@ const VideoExporter: React.FC<VideoExporterProps> = ({
 
           try {
             const blob = new Blob(chunks, { type: mimeType });
+            videoBlobRef.current = blob;
             chunks.length = 0; 
             
             if (blob.size === 0) {
@@ -453,27 +455,35 @@ const VideoExporter: React.FC<VideoExporterProps> = ({
   }
 
   const handleSaveMobile = async (targetUrl: string) => {
-    if (!targetUrl) return;
-    
     try {
       setStatus('finalizing');
-      console.log("Mobile save started for:", targetUrl);
+      console.log("Mobile save process started. Native?:", Capacitor.isNativePlatform());
 
-      // Fetch the blob from the URL
-      const response = await fetch(targetUrl);
-      const blob = await response.blob();
+      let blob = videoBlobRef.current;
       
-      // Better conversion for mobile
-      const arrayBuffer = await blob.arrayBuffer();
-      const bytes = new Uint8Array(arrayBuffer);
-      let binary = '';
-      const len = bytes.byteLength;
-      for (let i = 0; i < len; i++) {
-        binary += String.fromCharCode(bytes[i]);
+      if (!blob) {
+        console.log("Blob ref empty, attempting fetch from URL:", targetUrl);
+        const response = await fetch(targetUrl);
+        if (!response.ok) throw new Error(`Failed to fetch blob: ${response.statusText}`);
+        blob = await response.blob();
       }
-      const base64Data = window.btoa(binary);
+      
+      console.log("Blob size for save:", blob.size);
+      
+      // Use FileReader for the most reliable Base64 conversion on mobile
+      const base64Data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const res = reader.result as string;
+          const base64 = res.split(',')[1];
+          resolve(base64);
+        };
+        reader.onerror = () => reject(new Error("FileReader failed"));
+        reader.readAsDataURL(blob);
+      });
 
       const fileName = `kanchipuram_couture_${new Date().getTime()}.${extension}`;
+      console.log("Saving file to Cache directory:", fileName);
       
       // Save to Cache directory - this is accessible for Sharing
       const savedFile = await Filesystem.writeFile({
@@ -482,9 +492,9 @@ const VideoExporter: React.FC<VideoExporterProps> = ({
         directory: Directory.Cache
       });
 
-      console.log("File saved to:", savedFile.uri);
+      console.log("File successfully saved at:", savedFile.uri);
 
-      // Share the file (this allows saving to gallery or sending via IG/WhatsApp)
+      // Share the file
       await Share.share({
         title: 'Kanchipuram Couture Reel',
         text: 'My latest bridal reel creation',
@@ -494,8 +504,12 @@ const VideoExporter: React.FC<VideoExporterProps> = ({
       
       setStatus('done');
     } catch (err: any) {
-      console.error("Mobile save fail:", err);
-      alert("Mobile save failed: " + (err.message || "Unknown error"));
+      console.error("Mobile save sequence failed:", err);
+      // Fallback: If share fails, just try to open it in a new window as a last resort
+      try {
+        alert("Preparing manual download fallback...");
+        window.open(targetUrl, '_blank');
+      } catch (e) {}
       setStatus('error');
     }
   };
@@ -601,7 +615,7 @@ const VideoExporter: React.FC<VideoExporterProps> = ({
                     <p className="text-[11px] text-stone-400 font-medium uppercase tracking-[0.2em] mb-2">Reel Generated Successfully</p>
                     <p className="text-[10px] text-stone-500 italic">
                       {Capacitor.isNativePlatform() 
-                        ? 'Click the button above to save the video to your device gallery.'
+                        ? 'Click the button above to "Save Video" to your gallery. If that fails, long-press the video above and select "Download Video".'
                         : 'The download was triggered automatically. If it didn\'t start, please click the button above.'}
                     </p>
                   </div>
