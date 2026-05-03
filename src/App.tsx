@@ -12,6 +12,8 @@ import MusicSelector, { SOUTHERN_CLASSICS } from './components/MusicSelector';
 import ReelPreview from './components/ReelPreview';
 import VideoExporter from './components/VideoExporter';
 import HistoryView from './components/HistoryView';
+import { db as historyDb, urlToBase64, base64ToBlobUrl } from './lib/db';
+import { useLiveQuery } from 'dexie-react-hooks';
 
 const DEFAULT_STORY_TEXTS = [
   "The Morning Glow...",
@@ -61,10 +63,8 @@ export default function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState(0);
   const [analysisStep, setAnalysisStep] = useState('');
-  const [history, setHistory] = useState<Reel[]>(() => {
-    const saved = localStorage.getItem('saree_reels_history');
-    return saved ? JSON.parse(saved) : [];
-  });
+  
+  const history = useLiveQuery(() => historyDb.reels.reverse().toArray()) || [];
 
   const [exportSessionId, setExportSessionId] = useState(0);
 
@@ -156,6 +156,7 @@ export default function App() {
         "instagramCaption": "string"
       }`;
 
+      console.log("Starting saree analysis with model: gemini-2.0-flash");
       const response = await ai.models.generateContent({
         model: "gemini-2.0-flash",
         contents: {
@@ -271,36 +272,65 @@ export default function App() {
     setExportProgress(0);
   };
 
-  const saveToHistory = (url: string) => {
+  const saveToHistory = async (url: string) => {
     setVideoUrl(url);
-    // Don't reset state here, wait for completion
+    
+    // Convert all photo URLs to Base64 for persistent storage in IndexedDB
+    const persistentPhotos = await Promise.all(photos.map(async (p) => ({
+      ...p,
+      url: p.url.startsWith('blob:') ? await urlToBase64(p.url) : p.url
+    })));
+
     const newReel: Reel = {
       id: Math.random().toString(36).substr(2, 9),
       createdAt: new Date().toISOString(),
-      photos: [...photos],
+      photos: persistentPhotos,
       song: selectedSong,
       texts: [...storyTexts],
       aesthetic: selectedAesthetic,
       transitionType: selectedTransition
     };
-    const updatedHistory = [newReel, ...history];
-    setHistory(updatedHistory);
-    localStorage.setItem('saree_reels_history', JSON.stringify(updatedHistory));
+    
+    await historyDb.reels.add(newReel);
   };
 
-  const deleteReel = (id: string) => {
-    const updatedHistory = history.filter(r => r.id !== id);
-    setHistory(updatedHistory);
-    localStorage.setItem('saree_reels_history', JSON.stringify(updatedHistory));
+  const deleteReel = async (id: string) => {
+    await historyDb.reels.delete(id);
+  };
+
+  const hydrateReel = (reel: Reel): Photo[] => {
+    // Convert persistent Base64 back to temporary blob URLs for efficient usage in memory
+    return reel.photos.map(p => ({
+      ...p,
+      url: p.url.startsWith('data:') ? base64ToBlobUrl(p.url) : p.url
+    }));
   };
 
   const selectReelFromHistory = (reel: Reel) => {
-    setPhotos(reel.photos);
+    const hydratedPhotos = hydrateReel(reel);
+    setPhotos(hydratedPhotos);
     setSelectedSong(reel.song);
     if (reel.texts) setStoryTexts(reel.texts);
     if (reel.aesthetic) setSelectedAesthetic(reel.aesthetic);
     setSelectedTransition(reel.transitionType ?? 'auto');
+    setVideoUrl(null); 
     setState('preview');
+  };
+
+  const downloadReelFromHistory = (reel: Reel) => {
+    const hydratedPhotos = hydrateReel(reel);
+    setPhotos(hydratedPhotos);
+    setSelectedSong(reel.song);
+    if (reel.texts) setStoryTexts(reel.texts);
+    if (reel.aesthetic) setSelectedAesthetic(reel.aesthetic);
+    setSelectedTransition(reel.transitionType ?? 'auto');
+    setVideoUrl(null);
+    setState('preview');
+    
+    // Trigger export in next frame to ensure state is flushed
+    setTimeout(() => {
+      startExport();
+    }, 100);
   };
 
   const prevStep = () => {
@@ -610,14 +640,7 @@ export default function App() {
                 onBack={() => setState('landing')} 
                 onSelectReel={selectReelFromHistory}
                 onDeleteReel={deleteReel}
-                onDownloadReel={(reel) => {
-                  setPhotos(reel.photos);
-                  setSelectedSong(reel.song);
-                  if (reel.texts) setStoryTexts(reel.texts);
-                  if (reel.aesthetic) setSelectedAesthetic(reel.aesthetic);
-                  setSelectedTransition(reel.transitionType ?? 'auto');
-                  setState('exporting');
-                }}
+                onDownloadReel={downloadReelFromHistory}
               />
             </motion.div>
           )}

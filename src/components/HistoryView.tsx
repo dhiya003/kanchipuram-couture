@@ -86,16 +86,35 @@ export default function HistoryView({ history, onBack, onSelectReel, onDeleteRee
                 </div>
               </div>
 
-              <div className="p-3 flex justify-between items-center bg-white">
-                <span className="text-[10px] text-gray-400 font-bold uppercase tracking-tighter">
-                  {reel.photos.length} Photos • {reel.song?.genre || 'Instrumental'}
-                </span>
-                <button 
-                  onClick={() => onDeleteReel(reel.id)}
-                  className="p-2 text-gray-300 hover:text-saree-maroon transition-colors"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+              <div className="p-3 flex justify-between items-center bg-white border-t border-gray-50">
+                <div className="flex flex-col">
+                  <span className="text-[10px] text-gray-400 font-bold uppercase tracking-tighter">
+                    {reel.photos.length} Photos • {reel.song?.genre || 'Instrumental'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button 
+                    onClick={() => onSelectReel(reel)}
+                    className="p-2 text-saree-gold hover:bg-saree-gold/10 rounded-full transition-colors"
+                    title="Preview"
+                  >
+                    <PlayCircle className="w-5 h-5" />
+                  </button>
+                  <button 
+                    onClick={() => onDownloadReel(reel)}
+                    className="p-2 text-saree-gold hover:bg-saree-gold/10 rounded-full transition-colors"
+                    title="Download/Export"
+                  >
+                    <Download className="w-5 h-5" />
+                  </button>
+                  <button 
+                    onClick={() => onDeleteReel(reel.id)}
+                    className="p-2 text-gray-300 hover:text-saree-maroon rounded-full transition-colors"
+                    title="Delete"
+                  >
+                    <Trash2 className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
             </motion.div>
           ))}
