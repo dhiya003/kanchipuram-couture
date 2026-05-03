@@ -37,8 +37,15 @@ jobs:
       - name: Change wrapper permissions
         run: chmod +x android/gradlew
 
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.5'
+
       - name: Build with Gradle
-        run: cd android && ./gradlew assembleDebug
+        run: |
+          cd android
+          gradle assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

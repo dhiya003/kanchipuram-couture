@@ -156,9 +156,9 @@ export default function App() {
         "instagramCaption": "string"
       }`;
 
-      console.log("Starting saree analysis with model: gemini-2.0-flash");
+      console.log("Starting saree analysis with model: gemini-1.5-flash");
       const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
+        model: "gemini-1.5-flash",
         contents: {
           parts: [
             ...imageParts.map(p => ({

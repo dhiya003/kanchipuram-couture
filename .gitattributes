@@ -1,0 +1,17 @@
+# Ensure binary files are handled correctly
+*.jar binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.mp3 binary
+*.mp4 binary
+*.webm binary
+
+# Ensure shell scripts use LF
+*.sh text eol=lf
+gradlew text eol=lf
