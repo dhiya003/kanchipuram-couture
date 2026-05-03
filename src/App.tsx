@@ -157,7 +157,7 @@ export default function App() {
       }`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-2.0-flash",
         contents: {
           parts: [
             ...imageParts.map(p => ({
@@ -205,6 +205,10 @@ export default function App() {
       setAnalysisProgress(100);
     } catch (error) {
       console.error("AI Analysis Failed", error);
+      // Fallback to defaults if AI fails
+      setStoryTexts([...DEFAULT_STORY_TEXTS]);
+      setInstagramCaption("Experience the timeless elegance of Kanchipuram silk. Handcrafted with passion, draped in tradition. #SareeHeritage #KanchipuramCouture #SilkSaree");
+      setSelectedAesthetic('vintage_cinema');
     } finally {
       setIsAnalyzing(false);
       setAnalysisProgress(0);
