@@ -34,10 +34,17 @@ import { GoogleGenAI, Type } from "@google/genai";
 let aiInstance: GoogleGenAI | null = null;
 const getAI = () => {
   if (!aiInstance) {
-    const apiKey = process.env.GEMINI_API_KEY;
+    // Safer check for mobile environments
+    let apiKey = '';
+    try {
+      apiKey = (typeof process !== 'undefined' ? (process.env?.GEMINI_API_KEY || '') : '') || 
+               ((import.meta as any).env?.VITE_GEMINI_API_KEY || '');
+    } catch (e) {
+      console.warn("Error accessing environment variables", e);
+    }
+
     if (!apiKey) {
       console.warn("GEMINI_API_KEY is missing. AI features will not work.");
-      // Return a dummy instance or handle error gracefully in the app
       aiInstance = new GoogleGenAI({ apiKey: 'MISSING' });
     } else {
       aiInstance = new GoogleGenAI({ apiKey });

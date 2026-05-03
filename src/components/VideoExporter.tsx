@@ -457,41 +457,45 @@ const VideoExporter: React.FC<VideoExporterProps> = ({
     
     try {
       setStatus('finalizing');
+      console.log("Mobile save started for:", targetUrl);
+
       // Fetch the blob from the URL
       const response = await fetch(targetUrl);
       const blob = await response.blob();
       
-      // Convert blob to base64
-      const reader = new FileReader();
-      const base64Data = await new Promise<string>((resolve) => {
-        reader.onloadend = () => {
-          const res = reader.result as string;
-          resolve(res.split(',')[1]); // Remove the data:video/mp4;base64, prefix
-        };
-        reader.readAsDataURL(blob);
-      });
+      // Better conversion for mobile
+      const arrayBuffer = await blob.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      let binary = '';
+      const len = bytes.byteLength;
+      for (let i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      const base64Data = window.btoa(binary);
 
       const fileName = `kanchipuram_couture_${new Date().getTime()}.${extension}`;
       
-      // Save to temporary directory first
+      // Save to Cache directory - this is accessible for Sharing
       const savedFile = await Filesystem.writeFile({
         path: fileName,
         data: base64Data,
         directory: Directory.Cache
       });
 
+      console.log("File saved to:", savedFile.uri);
+
       // Share the file (this allows saving to gallery or sending via IG/WhatsApp)
       await Share.share({
         title: 'Kanchipuram Couture Reel',
-        text: 'My latest bridal reel curation',
+        text: 'My latest bridal reel creation',
         url: savedFile.uri,
         dialogTitle: 'Save or Share Reel'
       });
       
       setStatus('done');
-      console.log("Mobile share/save completed.");
-    } catch (err) {
+    } catch (err: any) {
       console.error("Mobile save fail:", err);
+      alert("Mobile save failed: " + (err.message || "Unknown error"));
       setStatus('error');
     }
   };

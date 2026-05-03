@@ -83,8 +83,13 @@ export default function MusicSelector({ onSelect, selectedSong }: MusicSelectorP
         // Timeout check for preview
         const checkLoad = new Promise<boolean>((resolve) => {
           audio.oncanplay = () => resolve(true);
-          audio.onerror = () => resolve(false);
-          setTimeout(() => resolve(false), 3000);
+          audio.onerror = () => {
+             // Fallback: try without crossOrigin for preview
+             audio.crossOrigin = null as any;
+             audio.src = song.url;
+             resolve(true);
+          };
+          setTimeout(() => resolve(false), 5000);
         });
 
         audio.src = song.url;
