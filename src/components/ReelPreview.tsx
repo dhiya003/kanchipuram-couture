@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Photo, Song } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { Play, Pause, RefreshCcw, Share2, Download, Copy, Check, Instagram, PenSquare, Loader2 } from 'lucide-react';
+import { Play, Pause, RefreshCcw, Share2, Download, Copy, Check, Instagram, PenSquare, Loader2, Sparkles } from 'lucide-react';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { Capacitor } from '@capacitor/core';
@@ -179,13 +179,14 @@ export default function ReelPreview({
     let isCancelled = false;
 
     const setupAudio = async () => {
-      if (song?.url) {
-        // Clean up previous audio immediately to avoid overlaps
-        if (audioRef.current) {
-          audioRef.current.pause();
-          audioRef.current = null;
-        }
+      // 1. Always stop current audio if it exists
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = ""; // Clear source
+        audioRef.current = null;
+      }
 
+      if (song?.url) {
         const newAudio = new Audio();
         newAudio.crossOrigin = "anonymous";
         
@@ -234,6 +235,7 @@ export default function ReelPreview({
       isCancelled = true;
       if (audioRef.current) {
         audioRef.current.pause();
+        audioRef.current.src = "";
         audioRef.current = null;
       }
     };
@@ -613,13 +615,13 @@ export default function ReelPreview({
                   />
                   <span className="relative z-10 flex items-center gap-2">
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    Rendering {Math.round(exportProgress)}%
+                    Curation in Progress {Math.round(exportProgress)}%
                   </span>
                 </>
               ) : (
                 <>
-                  <Play className="w-5 h-5" />
-                  Render Reel
+                  <Sparkles className="w-5 h-5" />
+                  Curate Masterpiece
                 </>
               )}
             </button>

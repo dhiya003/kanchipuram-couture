@@ -175,11 +175,11 @@ const VideoExporter: React.FC<VideoExporterProps> = ({
           // Handle audio errors and loading gracefully
           await new Promise<void>((resolve) => {
             const timeout = setTimeout(() => {
-               console.warn("Audio load timed out, proceeding without audio.");
+               console.warn("Audio load timed out for recorder, proceeding with silent loop if needed.");
                resolve();
-            }, 3000);
+            }, 6000);
 
-            audio.oncanplaythrough = () => {
+            audio.oncanplay = () => {
               clearTimeout(timeout);
               try {
                 if (audioCtx && audioCtx.state !== 'closed') {
@@ -189,18 +189,19 @@ const VideoExporter: React.FC<VideoExporterProps> = ({
                   audioTrackMatched = true;
                 }
               } catch (e) {
-                console.warn("Could not connect audio source:", e);
+                console.warn("Could not connect audio source to recorder:", e);
               }
               resolve();
             };
 
             audio.onerror = () => {
               clearTimeout(timeout);
-              console.warn("Audio failed to load, exporting without audio.");
+              console.warn("Audio failed to load for recorder, continuing silently.");
               resolve();
             };
             
             if (!song?.url) resolve();
+            audio.load();
           });
           
           if (isCancelled) return;
@@ -306,8 +307,13 @@ const VideoExporter: React.FC<VideoExporterProps> = ({
           if (isCancelled) return;
 
           if (currentFrame >= totalFrames) {
-            console.log("Rendering complete, stopping recorder.");
-            if (recorder.state !== 'inactive') recorder.stop();
+            console.log("Rendering complete, waiting for stabilizer...");
+            if (recorder.state !== 'inactive') {
+              // Add a small delay to ensure the encoder catches the last frames
+              setTimeout(() => {
+                if (recorder.state !== 'inactive') recorder.stop();
+              }, 800);
+            }
             return;
           }
 

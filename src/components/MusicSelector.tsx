@@ -48,6 +48,18 @@ export default function MusicSelector({ onSelect, selectedSong }: MusicSelectorP
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [audioError, setAudioError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const loadingAbortRef = useRef<string | null>(null);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = "";
+        audioRef.current = null;
+      }
+    };
+  }, []);
 
   const filteredSongs = SOUTHERN_CLASSICS.filter(s => 
     s.title.toLowerCase().includes(search.toLowerCase()) || 
@@ -58,128 +70,122 @@ export default function MusicSelector({ onSelect, selectedSong }: MusicSelectorP
     e.stopPropagation();
     setAudioError(null);
     
+    // 1. Immediately stop any current audio or pending load
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = ""; // Force disconnect
+      audioRef.current = null;
+    }
+
+    // 2. If clicking the same song that is currently playing, just stop it
     if (playingId === song.id) {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
       setPlayingId(null);
-    } else {
-      if (!song.url) {
-         setPlayingId(song.id);
-         setTimeout(() => setPlayingId(null), 2000);
-         return;
-      }
+      loadingAbortRef.current = null;
+      return;
+    }
 
-      try {
-        if (audioRef.current) {
-          audioRef.current.pause();
-          audioRef.current = null;
-        }
+    // 3. Mark the new target
+    setPlayingId(song.id);
+    loadingAbortRef.current = song.id;
 
-// Logic moved into the checkLoad promise
-        
-        const checkLoad = new Promise<boolean>(async (resolve) => {
-          let resolved = false;
-          const timeout = setTimeout(() => {
-            if (!resolved) {
-              resolved = true;
-              resolve(false);
-            }
-          }, 15000);
+    if (!song.url) {
+       setTimeout(() => {
+         if (loadingAbortRef.current === song.id) setPlayingId(null);
+       }, 2000);
+       return;
+    }
 
-          try {
-            // Attempt 1: Fetch as blob to verify access and bypass some origin issues
-            console.log("Attempting fetch for:", song.url);
-            const response = await fetch(song.url, { mode: 'cors' }).catch(() => null);
-            
-            if (response && response.ok) {
-              const blob = await response.blob();
-              const blobUrl = URL.createObjectURL(blob);
-              
-              const audio = new Audio();
-              audio.src = blobUrl;
-              audio.load();
-              
-              audio.oncanplaythrough = () => {
-                if (!resolved) {
-                  resolved = true;
-                  clearTimeout(timeout);
-                  audioRef.current = audio;
-                  resolve(true);
-                }
-              };
-            } else {
-              // Attempt 2: Optimistic loading for simple Audio element
-              console.log("Fetch failed or no CORS, falling back to simple Audio for:", song.title);
-              const audio = new Audio();
-              audio.src = song.url;
-              audio.load();
-              
-              // On mobile, sometimes oncanplay doesn't fire until play() is called or just takes time
-              // but we want to be optimistic if it's a known URL
-              setTimeout(() => {
-                if (!resolved) {
-                  resolved = true;
-                  clearTimeout(timeout);
-                  audioRef.current = audio;
-                  resolve(true); // Optimistic success
-                }
-              }, 2000);
-            }
-          } catch (e) {
-            console.error("Music fetch failure:", e);
-            // Fallback to basic audio
-            const audio = new Audio();
-            audio.src = song.url;
-            audioRef.current = audio;
+    try {
+      const checkLoad = new Promise<HTMLAudioElement | null>(async (resolve) => {
+        let resolved = false;
+        const myId = song.id;
+
+        const timeout = setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            resolve(null); 
+          }
+        }, 6000);
+
+        try {
+          const audio = new Audio();
+          audio.preload = "auto";
+          audio.src = song.url;
+          
+          audio.oncanplay = () => {
             if (!resolved) {
               resolved = true;
               clearTimeout(timeout);
-              resolve(true);
+              // Crucial: check if we are still the relevant loading process
+              if (loadingAbortRef.current !== myId) {
+                resolve(null);
+              } else {
+                resolve(audio);
+              }
             }
-          }
-        });
+          };
 
-        const isOk = await checkLoad;
-        if (!isOk) {
-           setAudioError(`Could not load ${song.title}. Source might be blocked.`);
-           setPlayingId(null);
-           return;
+          audio.onerror = () => {
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(timeout);
+              resolve(null);
+            }
+          };
+
+          audio.load();
+        } catch (e) {
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timeout);
+            resolve(null);
+          }
         }
+      });
 
-        const audio = audioRef.current;
-        if (!audio) return;
-
-        const startMark = (selectedSong?.id === song.id && selectedSong.startOffset) 
-          ? selectedSong.startOffset 
-          : 30;
-          
-        audio.currentTime = startMark;
-        setPlayingId(song.id);
-
-        try {
-          await audio.play();
-        } catch (err: any) {
-          if (err.name !== 'AbortError') {
-            setAudioError(`Autoplay blocked. Click select to use this song.`);
-            setPlayingId(null);
-          }
-          return;
-        }
-
-        const timeoutId = setTimeout(() => {
-          if (audioRef.current === audio) {
-            audio.pause();
-            setPlayingId(null);
-          }
-        }, 10000);
-
-        audio.onended = () => {
+      const audio = await checkLoad;
+      
+      // Verification: ensure this song is still the one the user wants to hear
+      if (loadingAbortRef.current !== song.id || !audio) {
+        if (loadingAbortRef.current === song.id) {
           setPlayingId(null);
-          clearTimeout(timeoutId);
-        };
-      } catch (err) {
+          setAudioError(`Could not load melody.`);
+        }
+        return;
+      }
+
+      audioRef.current = audio;
+      const startMark = (selectedSong?.id === song.id && selectedSong.startOffset) 
+        ? selectedSong.startOffset 
+        : 30;
+        
+      audio.currentTime = startMark;
+      
+      try {
+        await audio.play();
+      } catch (err: any) {
+        if (err.name !== 'AbortError' && loadingAbortRef.current === song.id) {
+          setAudioError(`Click select to use this song.`);
+          setPlayingId(null);
+        }
+        return;
+      }
+
+      const timeoutId = setTimeout(() => {
+        if (audioRef.current === audio && loadingAbortRef.current === song.id) {
+          audio.pause();
+          setPlayingId(null);
+        }
+      }, 10000);
+
+      audio.onended = () => {
+        if (loadingAbortRef.current === song.id) {
+          setPlayingId(null);
+        }
+        clearTimeout(timeoutId);
+      };
+    } catch (err) {
+      if (loadingAbortRef.current === song.id) {
         setPlayingId(null);
       }
     }

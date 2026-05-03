@@ -68,6 +68,9 @@ export default function App() {
   const [showWatermark, setShowWatermark] = useState(() => {
     return localStorage.getItem('nivra_show_watermark') !== 'false';
   });
+  const [musicEnabled, setMusicEnabled] = useState(() => {
+    return localStorage.getItem('nivra_music_enabled') === 'true'; // Default false as requested
+  });
 
   useEffect(() => {
     localStorage.setItem('nivra_brand_name', brandName);
@@ -76,6 +79,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('nivra_show_watermark', String(showWatermark));
   }, [showWatermark]);
+
+  useEffect(() => {
+    localStorage.setItem('nivra_music_enabled', String(musicEnabled));
+  }, [musicEnabled]);
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [state]);
@@ -238,7 +245,13 @@ export default function App() {
       if (!selectedSong && SOUTHERN_CLASSICS.length > 0) {
         setSelectedSong(SOUTHERN_CLASSICS[0]);
       }
-      setState('music');
+      
+      if (musicEnabled) {
+        setState('music');
+      } else {
+        setState('preview');
+        startExport();
+      }
     }
   };
 
@@ -255,6 +268,19 @@ export default function App() {
     else if (state === 'preview') {
       startExport();
     }
+  };
+
+  const prevStep = () => {
+    if (state === 'upload') setState('landing');
+    else if (state === 'music') setState('upload');
+    else if (state === 'preview') {
+      if (musicEnabled) {
+        setState('music');
+      } else {
+        setState('upload');
+      }
+    }
+    else if (state === 'history') setState('landing');
   };
 
   useEffect(() => {
@@ -355,12 +381,6 @@ export default function App() {
     }, 100);
   };
 
-  const prevStep = () => {
-    if (state === 'upload') setState('landing');
-    else if (state === 'music') setState('upload');
-    else if (state === 'preview') setState('music');
-  };
-
   return (
     <div className="min-h-screen flex flex-col relative overflow-hidden bg-saree-paper">
       {/* Decorative Elements */}
@@ -395,8 +415,10 @@ export default function App() {
         {state !== 'landing' && state !== 'history' && (
           <div className="hidden md:flex gap-8 text-[10px] uppercase tracking-[0.3em] font-sans font-semibold text-gray-400">
             <span className={state === 'upload' ? 'text-saree-maroon border-b border-saree-gold' : ''}>01 Selection</span>
-            <span className={state === 'music' ? 'text-saree-maroon border-b border-saree-gold' : ''}>02 Melody</span>
-            <span className={state === 'preview' ? 'text-saree-maroon border-b border-saree-gold' : ''}>03 Masterpiece</span>
+            {musicEnabled && (
+              <span className={state === 'music' ? 'text-saree-maroon border-b border-saree-gold' : ''}>02 Melody</span>
+            )}
+            <span className={state === 'preview' ? 'text-saree-maroon border-b border-saree-gold' : ''}>{musicEnabled ? '03' : '02'} Masterpiece</span>
           </div>
         )}
 
@@ -446,6 +468,25 @@ export default function App() {
                       >
                         <motion.div 
                           animate={{ x: showWatermark ? 20 : 2 }}
+                          className="absolute top-1 left-0 w-3 h-3 bg-white rounded-full shadow-sm"
+                        />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="flex flex-col">
+                        <span className="text-sm font-semibold text-saree-ink">Cinematic Music</span>
+                        <span className="text-[10px] text-gray-400">Enable music selector</span>
+                      </div>
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setMusicEnabled(!musicEnabled);
+                        }}
+                        className={`w-10 h-5 rounded-full transition-colors relative ${musicEnabled ? 'bg-saree-gold' : 'bg-gray-200'}`}
+                      >
+                        <motion.div 
+                          animate={{ x: musicEnabled ? 20 : 2 }}
                           className="absolute top-1 left-0 w-3 h-3 bg-white rounded-full shadow-sm"
                         />
                       </button>
@@ -541,16 +582,17 @@ export default function App() {
                   initial={{ scale: 0.8, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
                   transition={{ duration: 0.8, ease: "easeOut" }}
-                  className="w-32 h-32 rounded-[2rem] bg-gradient-to-br from-saree-maroon to-stone-900 flex items-center justify-center relative shadow-2xl ring-4 ring-saree-gold/10"
+                  className="w-40 h-40 rounded-[2.5rem] bg-gradient-to-br from-saree-maroon via-saree-maroon to-stone-950 flex items-center justify-center relative shadow-2xl ring-4 ring-saree-gold/10 overflow-hidden group"
                 >
-                  <Crown className="w-16 h-16 text-saree-gold" strokeWidth={1} />
+                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(212,175,55,0.15)_0%,transparent_70%)] opacity-0 group-hover:opacity-100 transition-opacity duration-1000" />
+                  <Crown className="w-20 h-20 text-saree-gold z-10 drop-shadow-2xl" strokeWidth={1} />
                   <motion.div 
                     animate={{ rotate: 360 }}
-                    transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
-                    className="absolute inset-0 border-2 border-dashed border-saree-gold/20 rounded-full scale-125"
+                    transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
+                    className="absolute inset-2 border border-dashed border-saree-gold/30 rounded-[2.2rem]"
                   />
-                  <div className="absolute -top-4 -right-4 bg-saree-gold p-2 rounded-xl shadow-lg">
-                    <Sparkles className="w-4 h-4 text-stone-900" />
+                  <div className="absolute -top-6 -right-6 bg-saree-gold p-4 rounded-full shadow-2xl rotate-12">
+                    <Sparkles className="w-6 h-6 text-stone-950" />
                   </div>
                 </motion.div>
 
@@ -635,7 +677,7 @@ export default function App() {
             >
               <ReelPreview 
                 photos={photos} 
-                song={selectedSong || SOUTHERN_CLASSICS[0]} 
+                song={musicEnabled ? (selectedSong || SOUTHERN_CLASSICS[0]) : null} 
                 storyTexts={storyTexts}
                 onTextChange={setStoryTexts}
                 instagramCaption={instagramCaption}
@@ -660,7 +702,7 @@ export default function App() {
               {isExporting && (
                 <VideoExporter 
                   photos={photos} 
-                  song={selectedSong || null} 
+                  song={musicEnabled ? (selectedSong || null) : null} 
                   texts={storyTexts} 
                   transitionType={selectedTransition}
                   aesthetic={selectedAesthetic}
@@ -715,7 +757,9 @@ export default function App() {
           <div className="flex items-center gap-6">
             <div className="hidden lg:flex gap-2">
               <div className={`w-2 h-2 rounded-full ${state === 'upload' ? 'bg-saree-gold' : 'bg-gray-200'}`} />
-              <div className={`w-2 h-2 rounded-full ${state === 'music' ? 'bg-saree-gold' : 'bg-gray-200'}`} />
+              {musicEnabled && (
+                <div className={`w-2 h-2 rounded-full ${state === 'music' ? 'bg-saree-gold' : 'bg-gray-200'}`} />
+              )}
               <div className={`w-2 h-2 rounded-full ${state === 'preview' ? 'bg-saree-gold' : 'bg-gray-200'}`} />
             </div>
 
