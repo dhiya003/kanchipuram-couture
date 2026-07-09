@@ -28,7 +28,7 @@ The application is built as a highly responsive **React SPA** with a **Mobile-Na
 ## 🧭 Developer Lifecycle: Step-by-Step
 
 ### 1. The AI Analysis Pulse
-When images are uploaded, the app extracts base64 data and sends it to `gemini-2.0-flash`. The prompt (stored in `App.tsx`) instructs the AI to returning a structured JSON containing:
+When images are uploaded, the app extracts base64 data and sends it to `gemini-3-flash-preview`. The prompt (stored in `App.tsx`) instructs the AI to returning a structured JSON containing:
 - **Aesthetic:** (e.g., 'vintage_cinema' or 'modern_luxury').
 - **Story Texts:** Narrative hooks based on the saree's weave/color.
 - **Caption:** An SEO-optimized Instagram caption.
@@ -64,7 +64,7 @@ The app is pre-configured for Capacitor.
 
 1. **MediaRecorder Formats:** Safari handles downloads differently than Chrome. The `ReelPreview` component uses a direct `<a>` tag with a blob URL to ensure maximum compatibility.
 2. **Mobile Screen Wake:** For long renders (60s+), the device might sleep. The UI includes a "Rendering..." overlay to keep the user engaged.
-3. **API Limits:** If you hit `PERMISSION_DENIED`, check the model version in `App.tsx`. We transitioned to `gemini-2.0-flash` for higher stability.
+3. **API Limits:** If you hit `PERMISSION_DENIED`, check the model version in `App.tsx`. We transitioned to `gemini-3-flash-preview` for higher stability.
 
 ---
 

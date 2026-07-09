@@ -20,14 +20,24 @@ export interface Song {
   startOffset?: number;
 }
 
+export interface TextConfig {
+  font: 'serif' | 'sans' | 'script' | 'display';
+  color: string;
+  container: string; // Tailwind placement classes
+  align: 'left' | 'center' | 'right';
+}
+
 export interface Reel {
   id: string;
   createdAt: string;
   photos: Photo[];
   song?: Song;
   texts?: string[];
+  textConfigs?: TextConfig[];
   aesthetic?: string;
+  filter?: string;
   transitionType?: number | 'auto';
+  instagramCaption?: string;
 }
 
-export type AppState = 'landing' | 'upload' | 'music' | 'preview' | 'exporting' | 'complete' | 'history';
+export type AppState = 'landing' | 'upload' | 'music' | 'preview' | 'exporting' | 'complete' | 'history' | 'pose_studio';

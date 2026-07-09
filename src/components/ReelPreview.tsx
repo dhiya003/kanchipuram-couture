@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Photo, Song } from '../types';
+import { Photo, Song, TextConfig } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { Play, Pause, RefreshCcw, Share2, Download, Copy, Check, Instagram, PenSquare, Loader2, Sparkles } from 'lucide-react';
+import { Play, Pause, RefreshCcw, Share2, Download, Copy, Check, Instagram, PenSquare, Loader2, Sparkles, Type as TypeIcon, Palette, Move, AlignLeft, AlignCenter, AlignRight, Sliders } from 'lucide-react';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { Capacitor } from '@capacitor/core';
@@ -10,12 +10,16 @@ interface ReelPreviewProps {
   photos: Photo[];
   song?: Song;
   storyTexts: string[];
+  storyConfigs?: TextConfig[];
   transitionType?: number | 'auto';
   onTransitionChange?: (type: number | 'auto') => void;
   onExport?: () => void;
   onTextChange?: (texts: string[]) => void;
+  onConfigsChange?: (configs: TextConfig[]) => void;
   aesthetic?: string;
   onAestheticChange?: (aesthetic: string) => void;
+  filter?: string;
+  onFilterChange?: (filter: string) => void;
   instagramCaption?: string;
   onInstagramCaptionChange?: (caption: string) => void;
   brandName?: string;
@@ -28,38 +32,92 @@ interface ReelPreviewProps {
 }
 
 const TRANSITION_VARIANTS = [
-  { name: "Cinematic Zoom", initial: { scale: 1.2, opacity: 0 }, animate: { scale: 1, opacity: 1 }, exit: { scale: 0.9, opacity: 0 } },
-  { name: "Classic Fade", initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 } },
-  { name: "Slide Left", initial: { x: '100%', opacity: 0, filter: 'blur(20px)' }, animate: { x: 0, opacity: 1, filter: 'blur(0px)' }, exit: { x: '-100%', opacity: 0, filter: 'blur(20px)' } },
-  { name: "Slide Up", initial: { y: '100%', opacity: 0, filter: 'blur(20px)' }, animate: { y: 0, opacity: 1, filter: 'blur(0px)' }, exit: { y: '-100%', opacity: 0, filter: 'blur(20px)' } },
-  { name: "Dreamy Blur", initial: { filter: 'blur(30px)', opacity: 0, scale: 1.1 }, animate: { filter: 'blur(0px)', opacity: 1, scale: 1 }, exit: { filter: 'blur(30px)', opacity: 0, scale: 0.9 } },
-  { name: "Artistic Tilt", initial: { rotate: 5, scale: 1.3, opacity: 0 }, animate: { rotate: 0, scale: 1, opacity: 1 }, exit: { rotate: -5, scale: 0.9, opacity: 0 } },
-  { name: "Slide Right", initial: { x: '-100%', opacity: 0, filter: 'blur(20px)' }, animate: { x: 0, opacity: 1, filter: 'blur(0px)' }, exit: { x: '100%', opacity: 0, filter: 'blur(20px)' } },
-  { name: "Slide Down", initial: { y: '-100%', opacity: 0, filter: 'blur(20px)' }, animate: { y: 0, opacity: 1, filter: 'blur(0px)' }, exit: { y: '100%', opacity: 0, filter: 'blur(20px)' } },
-  { name: "Diagonal", initial: { x: '50%', y: '50%', opacity: 0, filter: 'blur(8px)' }, animate: { x: 0, y: 0, opacity: 1, filter: 'blur(0px)' }, exit: { x: '-50%', y: '-50%', opacity: 0, filter: 'blur(8px)' } }
+  { 
+    name: "Golden Glimmer", 
+    initial: { opacity: 0, scale: 1.1, filter: 'brightness(2) contrast(1.2)' }, 
+    animate: { opacity: 1, scale: 1, filter: 'brightness(1) contrast(1)' }, 
+    exit: { opacity: 0, scale: 0.9, filter: 'brightness(3) contrast(0.8) blur(10px)' } 
+  },
+  { 
+    name: "Silk Reveal", 
+    initial: { x: '100%', opacity: 0, skewX: -10 }, 
+    animate: { x: 0, opacity: 1, skewX: 0 }, 
+    exit: { x: '-10%', opacity: 0.5, scale: 0.95 } 
+  },
+  { 
+    name: "Temple Bloom", 
+    initial: { opacity: 0, scale: 1.05, filter: 'blur(30px) brightness(1.5)' }, 
+    animate: { opacity: 1, scale: 1, filter: 'blur(0px) brightness(1)' }, 
+    exit: { opacity: 0, scale: 0.95, filter: 'blur(30px) brightness(1.5)' } 
+  },
+  { 
+    name: "Diagonal Wipe", 
+    initial: { clipPath: 'polygon(100% 0, 100% 0, 100% 100%, 100% 100%)', opacity: 0 }, 
+    animate: { clipPath: 'polygon(0 0, 100% 0, 100% 100%, 0 100%)', opacity: 1 }, 
+    exit: { opacity: 0, transition: { duration: 0.5 } } 
+  },
+  { 
+    name: "Macro Focus", 
+    initial: { scale: 2, opacity: 0, filter: 'blur(10px)' }, 
+    animate: { scale: 1, opacity: 1, filter: 'blur(0px)' }, 
+    exit: { scale: 0.5, opacity: 0, filter: 'blur(20px)' } 
+  },
+  { 
+    name: "Classic Fade", 
+    initial: { opacity: 0 }, 
+    animate: { opacity: 1 }, 
+    exit: { opacity: 0 } 
+  }
 ];
 
 const TEXT_STYLES = [
-  { container: "bottom-20 inset-x-4 text-center max-w-[90%] mx-auto", label: "THE COLLECTION" },
-  { container: "bottom-20 left-8 text-left max-w-[80%]", label: "HERITAGE" },
-  { container: "top-20 left-8 text-left max-w-[80%]", label: "SIGNATURE" },
-  { container: "bottom-32 inset-x-4 text-center max-w-[90%] mx-auto", label: "TIMELESS SILK" },
-  { container: "top-40 inset-x-4 text-center max-w-[90%] mx-auto", label: "ETHEREAL" },
-  { container: "bottom-40 right-8 text-right ml-auto max-w-[80%]", label: "CRAFTMANSHIP" },
-  { container: "top-1/3 inset-x-4 text-center max-w-[90%] mx-auto", label: "ARTISTRY" },
-  { container: "bottom-1/4 left-10 text-left max-w-[80%]", label: "BRIDE'S CHOICE" }
+  { container: "bottom-24 inset-x-6 text-center max-w-[90%] mx-auto", label: "Bottom Center", align: 'center' as const },
+  { container: "bottom-24 left-10 text-left max-w-[80%]", label: "Bottom Left", align: 'left' as const },
+  { container: "top-24 left-10 text-left max-w-[80%]", label: "Top Left", align: 'left' as const },
+  { container: "top-24 right-10 text-right max-w-[80%] ml-auto", label: "Top Right", align: 'right' as const },
+  { container: "bottom-36 inset-x-6 text-center max-w-[90%] mx-auto", label: "Middle Lower", align: 'center' as const },
+  { container: "top-44 inset-x-6 text-center max-w-[90%] mx-auto", label: "Middle Upper", align: 'center' as const },
+  { container: "bottom-44 right-10 text-right ml-auto max-w-[80%]", label: "Mid Right", align: 'right' as const },
+  { container: "bottom-1/4 left-12 text-left max-w-[80%]", label: "Side Lower", align: 'left' as const }
+];
+
+const FONTS = [
+  { id: 'serif', name: 'Classic Serif', class: 'serif-text italic' },
+  { id: 'sans', name: 'Modern Sans', class: 'font-sans font-bold uppercase tracking-tighter' },
+  { id: 'script', name: 'Elegant Script', class: 'display-text' },
+  { id: 'display', name: 'Royal Display', class: 'display-text uppercase tracking-widest' }
+];
+
+const COLORS = [
+  { id: 'white', name: 'Pearl White', hex: '#FFFFFF' },
+  { id: 'gold', name: 'Temple Gold', hex: '#D4AF37' },
+  { id: 'maroon', name: 'Kumkum', hex: '#722F37' },
+  { id: 'cream', name: 'Silk Cream', hex: '#FFFDD0' }
+];
+
+export const COLOR_GRADES = [
+  { id: 'none', name: 'Natural', filter: 'none' },
+  { id: 'royal', name: 'Royal Heirloom', filter: 'contrast(1.1) saturate(1.1) sepia(0.1) brightness(0.95)' },
+  { id: 'temple', name: 'Temple Gold', filter: 'contrast(1.05) saturate(1.3) hue-rotate(-5deg) brightness(1.05)' },
+  { id: 'midnight', name: 'Midnight Berry', filter: 'contrast(1.2) saturate(1.4) hue-rotate(10deg) brightness(0.8)' },
+  { id: 'vintage', name: 'Vintage Silk', filter: 'contrast(0.9) saturate(0.8) sepia(0.3) brightness(1.1)' },
+  { id: 'emerald', name: 'Emerald Heritage', filter: 'contrast(1.15) saturate(1.2) hue-rotate(-20deg) brightness(0.9)' }
 ];
 
 export default function ReelPreview({ 
   photos, 
   song, 
-  storyTexts, 
+  storyTexts = [], 
+  storyConfigs = [],
   transitionType = 'auto', 
   onTransitionChange, 
   onExport, 
   onTextChange,
+  onConfigsChange,
   aesthetic = 'vintage_cinema',
   onAestheticChange,
+  filter = 'none',
+  onFilterChange,
   instagramCaption = '',
   onInstagramCaptionChange,
   brandName = 'SAREE HERITAGE',
@@ -74,8 +132,38 @@ export default function ReelPreview({
   const [isEditing, setIsEditing] = useState(false);
   const [isCopying, setIsCopying] = useState(false);
   const [isEditingCaption, setIsEditingCaption] = useState(false);
+  const [activeTab, setActiveTab] = useState<'text' | 'visuals' | 'typography' | 'grading'>('visuals');
+  
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Initialize configs if empty
+  useEffect(() => {
+    if (storyConfigs && storyConfigs.length === 0 && storyTexts && storyTexts.length > 0) {
+      const initialConfigs: TextConfig[] = storyTexts.map((_, i) => ({
+        font: 'serif',
+        color: '#FFFFFF',
+        container: TEXT_STYLES[i % TEXT_STYLES.length].container,
+        align: TEXT_STYLES[i % TEXT_STYLES.length].align
+      }));
+      onConfigsChange?.(initialConfigs);
+    }
+  }, [storyTexts?.length || 0]);
+
+  const currentConfig = useMemo(() => {
+    return storyConfigs[currentIndex] || {
+      font: 'serif' as const,
+      color: '#FFFFFF',
+      container: TEXT_STYLES[currentIndex % TEXT_STYLES.length].container,
+      align: TEXT_STYLES[currentIndex % TEXT_STYLES.length].align
+    };
+  }, [currentIndex, storyConfigs]);
+
+  const updateCurrentConfig = (updates: Partial<TextConfig>) => {
+    const newConfigs = [...storyConfigs];
+    newConfigs[currentIndex] = { ...currentConfig, ...updates };
+    onConfigsChange?.(newConfigs);
+  };
 
   const handleCopyCaption = () => {
     navigator.clipboard.writeText(instagramCaption);
@@ -133,20 +221,26 @@ export default function ReelPreview({
   };
 
   const seoHookThreshold = 125;
-  const isHookValid = instagramCaption.length > 20 && instagramCaption.length <= seoHookThreshold;
-  const captionLength = instagramCaption.length;
+  const isHookValid = (instagramCaption?.length || 0) > 20 && (instagramCaption?.length || 0) <= seoHookThreshold;
+  const captionLength = instagramCaption?.length || 0;
 
   // Cycle duration per photo in ms
   const PHOTO_DURATION = 4000;
 
-  // Ensure minimum 10 seconds (roughly 4 segments of 3s each)
+  // Ensure we show all story texts if they exist
   const displayPhotos = useMemo(() => {
-    if (photos.length === 0) return [];
-    if (photos.length === 1) return [photos[0], photos[0], photos[0], photos[0]];
-    if (photos.length === 2) return [photos[0], photos[1], photos[0], photos[1]];
-    if (photos.length === 3) return [photos[0], photos[1], photos[2], photos[0]];
-    return photos;
-  }, [photos]);
+    if (!photos || photos.length === 0) return [];
+    
+    // The master length is at least enough to cover all story texts
+    const storyTextsLength = storyTexts?.length || 0;
+    const targetLength = Math.max(photos.length, storyTextsLength, 4);
+    
+    const result: Photo[] = [];
+    for (let i = 0; i < targetLength; i++) {
+      result.push(photos[i % photos.length]);
+    }
+    return result;
+  }, [photos, storyTexts?.length]);
 
   const AESTHETICS = [
     { id: 'vintage_cinema', name: 'Vintage Cinema' },
@@ -156,13 +250,14 @@ export default function ReelPreview({
   ];
 
   const currentVariant = useMemo(() => {
+    const variantsLength = TRANSITION_VARIANTS.length || 1;
     if (transitionType === 'auto') {
-      return TRANSITION_VARIANTS[currentIndex % TRANSITION_VARIANTS.length];
+      return TRANSITION_VARIANTS[currentIndex % variantsLength];
     }
-    return TRANSITION_VARIANTS[transitionType % TRANSITION_VARIANTS.length];
+    return TRANSITION_VARIANTS[Number(transitionType) % variantsLength];
   }, [currentIndex, transitionType]);
 
-  const currentStyle = TEXT_STYLES[currentIndex % TEXT_STYLES.length];
+  const currentStyle = (TEXT_STYLES && TEXT_STYLES.length > 0) ? TEXT_STYLES[currentIndex % TEXT_STYLES.length] : null;
 
   const handleEditClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -266,7 +361,7 @@ export default function ReelPreview({
     let timer: NodeJS.Timeout;
     let progressTimer: NodeJS.Timeout;
 
-    if (isPlaying && displayPhotos.length > 0) {
+    if (isPlaying && displayPhotos && displayPhotos.length > 0) {
       timer = setInterval(() => {
         setCurrentIndex((prev) => (prev + 1) % displayPhotos.length);
         setProgress(0);
@@ -281,7 +376,7 @@ export default function ReelPreview({
       clearInterval(timer);
       clearInterval(progressTimer);
     };
-  }, [isPlaying, displayPhotos.length]);
+  }, [isPlaying, displayPhotos?.length]);
 
   const restartReel = () => {
     setCurrentIndex(0);
@@ -295,6 +390,7 @@ export default function ReelPreview({
   };
 
   const currentText = useMemo(() => {
+    if (!storyTexts || storyTexts.length === 0) return "";
     return storyTexts[currentIndex % storyTexts.length];
   }, [currentIndex, storyTexts]);
 
@@ -349,7 +445,7 @@ export default function ReelPreview({
     document.body.removeChild(a);
   };
 
-  if (photos.length === 0) return null;
+  if (!photos || photos.length === 0) return null;
 
   return (
     <div className="flex flex-col items-center gap-8 w-full max-w-lg mx-auto py-8">
@@ -361,24 +457,24 @@ export default function ReelPreview({
       </div>
 
       {/* Reel Canvas - 9:16 Aspect Ratio */}
-      <div className={`relative aspect-[9/16] w-full max-w-[340px] rounded-[40px] overflow-hidden shadow-2xl border-[8px] border-saree-ink bg-black group transition-all duration-500 aesthetic-${aesthetic.replace('_', '-')}`}>
+      <div className={`relative aspect-[9/16] w-full max-w-[340px] rounded-[48px] overflow-hidden shadow-2xl border-[6px] border-saree-ink bg-black group transition-all duration-700 aesthetic-${aesthetic.replace('_', '-')}`}>
         <AnimatePresence mode="popLayout">
           <motion.div
             key={`${displayPhotos[currentIndex].id}-${currentIndex}`}
             initial={currentVariant.initial}
             animate={{
               ...currentVariant.animate,
-              scale: currentIndex % 2 === 0 ? [1, 1.12] : [1.12, 1], // Continuous zoom
+              scale: currentIndex % 2 === 0 ? [1, 1.15] : [1.15, 1], // Improved Ken Burns
             }}
             exit={currentVariant.exit}
             transition={{ 
-              opacity: { duration: 0.8 },
-              scale: { duration: 4, ease: "linear" },
-              filter: { duration: 0.8 },
-              x: { duration: 0.8 },
-              y: { duration: 0.8 } 
+              opacity: { duration: 1, ease: "easeInOut" },
+              scale: { duration: 4.2, ease: "linear" },
+              filter: { duration: 1 },
+              x: { duration: 1, ease: [0.4, 0, 0.2, 1] },
+              y: { duration: 1, ease: [0.4, 0, 0.2, 1] } 
             }}
-            className={`absolute inset-0 photo-container ${(aesthetic === 'royal_palace' || aesthetic === 'temple_aura') ? 'aesthetic-bloom' : ''}`}
+            className={`absolute inset-0 photo-container luxury-vignette ${(aesthetic === 'royal_palace' || aesthetic === 'temple_aura') ? 'aesthetic-bloom' : ''}`}
           >
             <motion.div
               className="w-full h-full"
@@ -396,7 +492,8 @@ export default function ReelPreview({
               <img 
                 src={displayPhotos[currentIndex].url} 
                 alt="Reel Slide" 
-                className="w-full h-full object-cover scale-110" // Slight overscan to prevent edges showing during shake
+                style={{ filter: COLOR_GRADES.find(g => g.id === filter)?.filter || 'none' }}
+                className="w-full h-full object-cover scale-110 transition-[filter] duration-700" // Slight overscan to prevent edges showing during shake
               />
             </motion.div>
             
@@ -425,16 +522,13 @@ export default function ReelPreview({
             </div>
             
             {/* Storyline Text Overlay */}
-            <div className={`absolute px-6 ${currentStyle.container}`}>
-              <motion.p 
-                initial={{ letterSpacing: '0.1em', opacity: 0, y: 10 }}
-                animate={{ letterSpacing: '0.3em', opacity: 0.8, y: 0 }}
-                transition={{ delay: 0.4, duration: 1 }}
-                className="text-saree-gold text-[10px] uppercase font-bold mb-2"
-              >
-                {currentStyle.label}
-              </motion.p>
-              
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.5 }}
+              className={`absolute px-6 ${currentConfig.container}`}
+            >
               <div className="relative group cursor-text" onClick={handleEditClick}>
                 {isEditing ? (
                   <input
@@ -444,27 +538,30 @@ export default function ReelPreview({
                     onChange={handleTextUpdate}
                     onBlur={() => setIsEditing(false)}
                     onKeyDown={(e) => e.key === 'Enter' && setIsEditing(false)}
-                    className={`w-full bg-black/40 text-white text-2xl md:text-3xl border-b border-saree-gold/50 outline-none px-2 py-1 ${aesthetic === 'modern_chic' ? 'font-sans' : 'italic display-text'}`}
+                    style={{ color: currentConfig.color }}
+                    className={`w-full bg-black/50 text-2xl md:text-3xl border-b border-white/20 outline-none px-2 py-1 rounded-sm ${FONTS.find(f => f.id === currentConfig.font)?.class || 'serif-text italic'}`}
                   />
                 ) : (
-                  <h2 className={`text-2xl md:text-3xl text-white drop-shadow-xl leading-tight overflow-hidden ${aesthetic === 'modern_chic' ? 'font-sans font-bold uppercase tracking-tight' : 'italic display-text'}`}>
-                    {currentText.split(' ').map((word, wordIndex, wordsArr) => {
-                      // Calculate starting global index for this word
+                  <h2 
+                    style={{ color: currentConfig.color, textAlign: currentConfig.align }}
+                    className={`text-2xl md:text-3xl drop-shadow-2xl leading-tight overflow-hidden ${FONTS.find(f => f.id === currentConfig.font)?.class || 'italic display-text font-medium'}`}
+                  >
+                    {(currentText || "").split(' ').map((word, wordIndex, wordsArr) => {
                       const wordStartGlobalIndex = wordsArr
                         .slice(0, wordIndex)
-                        .reduce((sum, w) => sum + w.length + 1, 0);
+                        .reduce((sum, w) => sum + (w?.length || 0) + 1, 0);
 
                       return (
-                        <span key={`${currentIndex}-${wordIndex}`} className="inline-block whitespace-nowrap">
+                        <span key={`${currentIndex}-${wordIndex}`} className="inline-block whitespace-nowrap overflow-hidden">
                           {word.split('').map((char, charIndex) => (
                             <motion.span
                               key={`${currentIndex}-${wordIndex}-${charIndex}`}
-                              initial={{ opacity: 0 }}
-                              animate={{ opacity: 1 }}
+                              initial={{ opacity: 0, y: 30, rotateX: 90, scale: 0.9, filter: 'blur(8px)' }}
+                              animate={{ opacity: 1, y: 0, rotateX: 0, scale: 1, filter: 'blur(0px)' }}
                               transition={{ 
-                                delay: 0.5 + ((wordStartGlobalIndex + charIndex) * 0.04), 
-                                duration: 0.05,
-                                ease: "linear"
+                                delay: 0.6 + ((wordStartGlobalIndex + charIndex) * 0.04), 
+                                duration: 0.8,
+                                ease: [0.22, 1, 0.36, 1]
                               }}
                               className="inline-block"
                             >
@@ -472,7 +569,7 @@ export default function ReelPreview({
                             </motion.span>
                           ))}
                           {wordIndex < wordsArr.length - 1 && (
-                            <span className="inline-block animate-pulse">&nbsp;</span>
+                            <span className="inline-block">&nbsp;</span>
                           )}
                         </span>
                       );
@@ -480,7 +577,7 @@ export default function ReelPreview({
                   </h2>
                 )}
                 {!isEditing && (
-                  <div className="absolute -top-6 -right-6 opacity-0 group-hover:opacity-100 transition-opacity bg-saree-maroon/80 text-white p-1 rounded text-[8px] uppercase tracking-tighter">
+                  <div className="absolute -top-6 -right-6 opacity-0 group-hover:opacity-100 transition-opacity bg-saree-maroon/80 text-white p-1 rounded text-[8px] uppercase tracking-tighter shadow-lg">
                     Click to Edit
                   </div>
                 )}
@@ -489,21 +586,23 @@ export default function ReelPreview({
               <motion.div 
                 initial={{ scaleX: 0, opacity: 0 }}
                 animate={{ scaleX: 1, opacity: 0.4 }}
-                transition={{ delay: 1.2, duration: 0.8 }}
-                className={`mt-4 h-[1px] w-12 bg-saree-gold origin-left ${currentStyle.container.includes('center') ? 'mx-auto origin-center' : ''}`} 
+                transition={{ delay: 1.4, duration: 1.2, ease: "circOut" }}
+                style={{ backgroundColor: currentConfig.color }}
+                className={`mt-4 h-[1px] w-12 origin-left ${currentConfig.container.includes('center') ? 'mx-auto origin-center' : ''}`} 
               />
               
               {showWatermark && (
                 <motion.p
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 1.5 }}
-                  className={`mt-6 text-[8px] tracking-[0.4em] font-bold text-saree-gold/80 uppercase ${currentStyle.container.includes('center') ? 'text-center' : ''}`}
+                  initial={{ opacity: 0, y: 10, filter: 'blur(4px)' }}
+                  animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+                  transition={{ delay: 1.8, duration: 1 }}
+                  style={{ color: currentConfig.color }}
+                  className={`mt-6 text-[8px] tracking-[0.4em] font-bold opacity-60 uppercase ${currentConfig.container.includes('center') ? 'text-center' : ''}`}
                 >
                   {brandName}
                 </motion.p>
               )}
-            </div>
+            </motion.div>
           </motion.div>
         </AnimatePresence>
 
@@ -536,57 +635,200 @@ export default function ReelPreview({
 
       {/* Control Panel */}
       <div className="w-full flex flex-col gap-6">
-        <div className="flex flex-col gap-3">
-          <label className="text-[10px] uppercase tracking-[0.2em] font-bold text-gray-400 text-center">
-            AI Aesthetic
-          </label>
-          <div className="flex flex-wrap justify-center gap-2">
-            {AESTHETICS.map((a) => (
-              <button
-                key={a.id}
-                onClick={() => onAestheticChange?.(a.id)}
-                className={`px-4 py-2 rounded-full border text-[10px] uppercase tracking-widest font-bold transition-all ${
-                  aesthetic === a.id
-                    ? 'bg-saree-gold text-white border-saree-gold'
-                    : 'bg-white text-gray-400 border-gray-100 hover:border-saree-gold/30'
-                }`}
-              >
-                {a.name}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-3">
-          <label className="text-[10px] uppercase tracking-[0.2em] font-bold text-gray-400 text-center">
-            Stitch Style
-          </label>
-          <div className="flex flex-wrap justify-center gap-2">
+        <div className="flex border-b border-gray-100 mb-2">
+          {[
+            { id: 'visuals', label: 'Visuals', icon: <Sparkles className="w-3.5 h-3.5" /> },
+            { id: 'grading', label: 'Exotic Grades', icon: <Sliders className="w-3.5 h-3.5" /> },
+            { id: 'typography', label: 'Typography', icon: <TypeIcon className="w-3.5 h-3.5" /> },
+            { id: 'text', label: 'Caption', icon: <Instagram className="w-3.5 h-3.5" /> }
+          ].map(tab => (
             <button
-              onClick={() => onTransitionChange?.('auto')}
-              className={`px-4 py-2 rounded-full border text-[10px] uppercase tracking-widest font-bold transition-all ${
-                transitionType === 'auto'
-                  ? 'bg-saree-maroon text-white border-saree-maroon'
-                  : 'bg-white text-gray-400 border-gray-100 hover:border-saree-gold/30'
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as any)}
+              className={`flex-1 flex items-center justify-center gap-2 py-3 text-[10px] uppercase tracking-widest font-bold transition-all border-b-2 ${
+                activeTab === tab.id ? 'border-saree-maroon text-saree-maroon' : 'border-transparent text-gray-400 hover:text-gray-600'
               }`}
             >
-              Cinematic Mix
+              {tab.icon}
+              {tab.label}
             </button>
-            {TRANSITION_VARIANTS.map((v, i) => (
-              <button
-                key={i}
-                onClick={() => onTransitionChange?.(i)}
-                className={`px-4 py-2 rounded-full border text-[10px] uppercase tracking-widest font-bold transition-all ${
-                  transitionType === i
-                    ? 'bg-saree-maroon text-white border-saree-maroon'
-                    : 'bg-white text-gray-400 border-gray-100 hover:border-saree-gold/30'
-                }`}
-              >
-                {v.name}
-              </button>
-            ))}
-          </div>
+          ))}
         </div>
+
+        {activeTab === 'visuals' && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+            <div className="flex flex-col gap-3">
+              <label className="text-[10px] uppercase tracking-[0.2em] font-bold text-gray-400 text-center">
+                AI Aesthetic
+              </label>
+              <div className="flex flex-wrap justify-center gap-2">
+                {AESTHETICS.map((a) => (
+                  <button
+                    key={a.id}
+                    onClick={() => onAestheticChange?.(a.id)}
+                    className={`px-4 py-2 rounded-full border text-[10px] uppercase tracking-widest font-bold transition-all ${
+                      aesthetic === a.id
+                        ? 'bg-saree-gold text-white border-saree-gold shadow-md'
+                        : 'bg-white text-gray-400 border-gray-100 hover:border-saree-gold/30'
+                    }`}
+                  >
+                    {a.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <label className="text-[10px] uppercase tracking-[0.2em] font-bold text-gray-400 text-center">
+                Stitch Style (Transition)
+              </label>
+              <div className="flex flex-wrap justify-center gap-2">
+                <button
+                  onClick={() => onTransitionChange?.('auto')}
+                  className={`px-4 py-2 rounded-full border text-[10px] uppercase tracking-widest font-bold transition-all ${
+                    transitionType === 'auto'
+                      ? 'bg-saree-maroon text-white border-saree-maroon shadow-md'
+                      : 'bg-white text-gray-400 border-gray-100 hover:border-saree-gold/30'
+                  }`}
+                >
+                  Cinematic Mix
+                </button>
+                {TRANSITION_VARIANTS.map((v, i) => (
+                  <button
+                    key={i}
+                    onClick={() => onTransitionChange?.(i)}
+                    className={`px-4 py-2 rounded-full border text-[10px] uppercase tracking-widest font-bold transition-all ${
+                      transitionType === i
+                        ? 'bg-saree-maroon text-white border-saree-maroon shadow-md'
+                        : 'bg-white text-gray-400 border-gray-100 hover:border-saree-gold/30'
+                    }`}
+                  >
+                    {v.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {activeTab === 'grading' && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+            <div className="flex flex-col gap-3">
+              <label className="text-[10px] uppercase tracking-[0.2em] font-bold text-gray-400 text-center">
+                Signature Silk Grades
+              </label>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                {COLOR_GRADES.map((grade) => (
+                  <button
+                    key={grade.id}
+                    onClick={() => onFilterChange?.(grade.id)}
+                    className={`flex flex-col items-center gap-3 p-4 rounded-2xl border transition-all ${
+                      filter === grade.id
+                        ? 'bg-saree-maroon text-white border-saree-maroon shadow-lg scale-[1.02]'
+                        : 'bg-white text-gray-500 border-gray-100 hover:border-saree-gold/30'
+                    }`}
+                  >
+                    <div 
+                      className="w-12 h-12 rounded-xl border border-white/20 overflow-hidden shadow-inner flex items-center justify-center bg-stone-100"
+                      style={{ filter: grade.filter }}
+                    >
+                      <img src={photos[0]?.url} alt="" className="w-full h-full object-cover scale-150" />
+                    </div>
+                    <span className="text-[9px] uppercase tracking-widest font-bold text-center leading-tight">
+                      {grade.name}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <p className="text-[9px] text-gray-400 italic text-center">
+              Curated tones designed to amplify the richness of high-end Kanchipuram silk.
+            </p>
+          </motion.div>
+        )}
+
+        {activeTab === 'typography' && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6 bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
+            <div className="flex items-center justify-between mb-2">
+               <h4 className="text-xs font-bold uppercase tracking-widest text-saree-maroon">Typography Studio</h4>
+               <span className="text-[10px] text-gray-400 italic">Slide {currentIndex + 1} of {displayPhotos.length}</span>
+            </div>
+
+            {/* Font Picker */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest font-bold text-gray-400">
+                <TypeIcon className="w-3 h-3" />
+                Font Style
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {FONTS.map(f => (
+                  <button
+                    key={f.id}
+                    onClick={() => updateCurrentConfig({ font: f.id as any })}
+                    className={`p-3 rounded-xl border text-sm transition-all ${
+                      currentConfig.font === f.id 
+                        ? 'border-saree-gold bg-saree-gold/5 text-saree-ink shadow-sm' 
+                        : 'border-gray-100 text-gray-400 hover:border-saree-gold/30'
+                    } ${f.class}`}
+                  >
+                    {f.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Color Picker */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest font-bold text-gray-400">
+                <Palette className="w-3 h-3" />
+                Text Color
+              </div>
+              <div className="flex gap-4 p-1">
+                {COLORS.map(c => (
+                  <button
+                    key={c.id}
+                    onClick={() => updateCurrentConfig({ color: c.hex })}
+                    className={`w-10 h-10 rounded-full border-2 transition-all relative ${
+                      currentConfig.color === c.hex ? 'border-saree-maroon scale-110 shadow-lg' : 'border-gray-100 hover:scale-105'
+                    }`}
+                    style={{ backgroundColor: c.hex }}
+                    title={c.name}
+                  >
+                    {currentConfig.color === c.hex && <Check className={`w-4 h-4 absolute inset-0 m-auto ${c.id === 'white' || c.id === 'cream' ? 'text-saree-maroon' : 'text-white'}`} />}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Position Picker */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest font-bold text-gray-400">
+                <Move className="w-3 h-3" />
+                Placement
+              </div>
+              <div className="grid grid-cols-4 gap-2">
+                {TEXT_STYLES.map((s, i) => (
+                  <button
+                    key={i}
+                    onClick={() => updateCurrentConfig({ container: s.container, align: s.align })}
+                    className={`aspect-square rounded-xl border flex items-center justify-center transition-all ${
+                      currentConfig.container === s.container 
+                        ? 'border-saree-gold bg-saree-gold/10 text-saree-gold shadow-sm' 
+                        : 'border-gray-100 text-gray-300 hover:border-saree-gold/30'
+                    }`}
+                    title={s.label}
+                  >
+                    {s.align === 'left' ? <AlignLeft className="w-4 h-4" /> : s.align === 'right' ? <AlignRight className="w-4 h-4" /> : <AlignCenter className="w-4 h-4" />}
+                  </button>
+                ))}
+              </div>
+            </div>
+            
+            <p className="text-[9px] text-gray-400 italic text-center pt-2">
+              Changes applied only to the current visible slide.
+            </p>
+          </motion.div>
+        )}
 
         <div className="flex flex-col gap-4 w-full">
           <div className="flex gap-4">

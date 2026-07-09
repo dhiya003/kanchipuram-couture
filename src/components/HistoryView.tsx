@@ -1,6 +1,33 @@
+import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { History as HistoryIcon, Trash2, ArrowLeft, PlayCircle, Download } from 'lucide-react';
+import { History as HistoryIcon, Trash2, ArrowLeft, PlayCircle, Download, Copy, Check } from 'lucide-react';
 import { Reel } from '../types';
+
+function CaptionSnippet({ caption }: { caption: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(caption);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="px-4 py-2.5 bg-stone-50 border-t border-gray-100 flex items-start gap-2 justify-between">
+      <p className="text-[11px] text-gray-500 italic line-clamp-2 leading-relaxed flex-1 select-text">
+        {caption}
+      </p>
+      <button 
+        onClick={handleCopy}
+        className="p-1 rounded hover:bg-gray-200 text-gray-400 hover:text-saree-gold transition-colors shrink-0"
+        title="Copy Instagram Caption"
+      >
+        {copied ? <Check className="w-3.5 h-3.5 text-green-600 animate-bounce" /> : <Copy className="w-3.5 h-3.5" />}
+      </button>
+    </div>
+  );
+}
 
 interface HistoryViewProps {
   history: Reel[];
@@ -85,6 +112,10 @@ export default function HistoryView({ history, onBack, onSelectReel, onDeleteRee
                   </button>
                 </div>
               </div>
+
+              {reel.instagramCaption && (
+                <CaptionSnippet caption={reel.instagramCaption} />
+              )}
 
               <div className="p-3 flex justify-between items-center bg-white border-t border-gray-50">
                 <div className="flex flex-col">

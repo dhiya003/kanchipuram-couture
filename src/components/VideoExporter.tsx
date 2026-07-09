@@ -5,25 +5,16 @@ import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { Capacitor } from '@capacitor/core';
 
-interface Photo {
-  id: string;
-  url: string;
-  color: string;
-}
-
-interface Song {
-  id: string;
-  title: string;
-  artist: string;
-  url: string;
-  duration: number;
-}
-
+import { Photo, Song, TextConfig } from '../types';
+import { COLOR_GRADES } from './ReelPreview';
+// ...
 interface VideoExporterProps {
   photos: Photo[];
   texts: string[];
+  textConfigs?: TextConfig[];
   song: Song | null;
   aesthetic: string;
+  filter?: string;
   brandName: string;
   showWatermark: boolean;
   transitionType: 'auto' | number;
@@ -51,9 +42,11 @@ const TEXT_STYLES_DATA = [
 
 const VideoExporter: React.FC<VideoExporterProps> = ({ 
   photos, 
-  texts, 
+  texts = [], 
+  textConfigs,
   song, 
   aesthetic, 
+  filter = 'none',
   brandName, 
   showWatermark,
   transitionType,
@@ -69,11 +62,12 @@ const VideoExporter: React.FC<VideoExporterProps> = ({
   const [extension, setExtension] = useState('webm');
 
   function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) {
+    if (!text) return [];
     const words = text.split(' ');
     const lines = [];
-    let currentLine = words[0];
+    let currentLine = words[0] || "";
 
-    for (let i = 1; i < words.length; i++) {
+    for (let i = 1; i < (words?.length || 0); i++) {
       const word = words[i];
       const width = ctx.measureText(currentLine + " " + word).width;
       if (width < maxWidth) {
@@ -83,7 +77,7 @@ const VideoExporter: React.FC<VideoExporterProps> = ({
         currentLine = word;
       }
     }
-    lines.push(currentLine);
+    if (currentLine) lines.push(currentLine);
     return lines;
   }
 
@@ -126,9 +120,18 @@ const VideoExporter: React.FC<VideoExporterProps> = ({
           return;
         }
 
+        // Ensure fonts are loaded before starting
+        if ('fonts' in document) {
+          try {
+            await document.fonts.ready;
+          } catch (e) {
+            console.warn("Font loading wait failed, proceeding anyway", e);
+          }
+        }
+
         console.log("Assets loading started...");
         // Load images
-        const images = await Promise.all(photos.map(p => {
+        const images = await Promise.all((photos || []).map(p => {
           return new Promise<HTMLImageElement>((resolve, reject) => {
             const img = new Image();
             img.crossOrigin = "anonymous";
@@ -146,17 +149,25 @@ const VideoExporter: React.FC<VideoExporterProps> = ({
 
         if (isCancelled) return;
 
-        let displayImages = images;
-        let displayTexts = texts;
-        if (images.length === 1) {
-          displayImages = [images[0], images[0], images[0], images[0]];
-          displayTexts = [texts[0] || '', texts[0] || '', texts[0] || '', texts[0] || ''];
-        } else if (images.length === 2) {
-          displayImages = [images[0], images[1], images[0], images[1]];
-          displayTexts = [texts[0] || '', texts[1] || '', texts[0] || '', texts[1] || ''];
-        }
+        const displayImages = (() => {
+          if (!images || images.length === 0) return [];
+          const textsLength = texts?.length || 0;
+          const targetLength = Math.max(images.length, textsLength, 4);
+          const result: HTMLImageElement[] = [];
+          for (let i = 0; i < targetLength; i++) {
+            result.push(images[i % images.length]);
+          }
+          return result;
+        })();
 
-        const totalDuration = displayImages.length * PHOTO_DURATION;
+        const displayTexts = (() => {
+          if (!displayImages || displayImages.length === 0) return [];
+          // Ensure we have enough texts, cycle them if needed
+          const validTexts = texts || [];
+          return displayImages.map((_, i) => validTexts[i % (validTexts.length || 1)] || "");
+        })();
+
+        const totalDuration = (displayImages?.length || 0) * PHOTO_DURATION;
         const totalFrames = Math.ceil(totalDuration * FPS);
         
         // Setup Media Stream and Recorder
@@ -301,6 +312,29 @@ const VideoExporter: React.FC<VideoExporterProps> = ({
         recorder.start(200);
         setStatus('processing');
 
+        const getCoordsFromContainer = (container: string) => {
+          const isTop = container.includes('top');
+          const isBottom = container.includes('bottom');
+          
+          let x = WIDTH / 2;
+          let y = HEIGHT / 2;
+
+          if (isTop) y = 300;
+          if (isBottom) y = HEIGHT - 300;
+          if (container.includes('bottom-36')) y = HEIGHT - 400;
+          if (container.includes('bottom-44')) y = HEIGHT - 480;
+          if (container.includes('top-44')) y = 440;
+          if (container.includes('top-1/3')) y = HEIGHT / 3;
+          if (container.includes('bottom-1/4')) y = HEIGHT * 0.75;
+          if (container.includes('top-24')) y = 260;
+          if (container.includes('bottom-24')) y = HEIGHT - 240;
+          
+          if (container.includes('left')) x = 100;
+          if (container.includes('right')) x = WIDTH - 100;
+
+          return { x, y };
+        };
+
         let isFinishing = false;
         const stopRecorder = () => {
           if (recorder.state !== 'inactive') {
@@ -336,8 +370,8 @@ const VideoExporter: React.FC<VideoExporterProps> = ({
 
           const photoIndex = Math.floor(elapsed / PHOTO_DURATION);
           const photoElapsed = elapsed % PHOTO_DURATION;
-          const currentImg = displayImages[photoIndex % displayImages.length];
-          const nextImg = displayImages[(photoIndex + 1) % displayImages.length];
+          const currentImg = (displayImages && displayImages.length > 0) ? displayImages[photoIndex % displayImages.length] : undefined;
+          const nextImg = (displayImages && displayImages.length > 0) ? displayImages[(photoIndex + 1) % displayImages.length] : undefined;
 
           ctx.fillStyle = '#100c08';
           ctx.fillRect(0, 0, WIDTH, HEIGHT);
@@ -350,65 +384,166 @@ const VideoExporter: React.FC<VideoExporterProps> = ({
           const panX = isZoomIn ? panProgress * 15 - 7.5 : (1 - panProgress) * 15 - 7.5;
           const panY = isZoomIn ? (1 - panProgress) * 8 - 4 : panProgress * 8 - 4;
 
+          const filterValue = COLOR_GRADES.find(g => g.id === filter)?.filter || 'none';
+          const transitionDuration = 0.8;
+          const isTransitioning = photoElapsed > PHOTO_DURATION - transitionDuration;
+          const transitionProgress = isTransitioning ? (photoElapsed - (PHOTO_DURATION - transitionDuration)) / transitionDuration : 0;
+          
+          const variantsLength = 6; // TRANSITION_VARIANTS.length in ReelPreview
+          const getActiveTransition = () => {
+            if (transitionType === 'auto') return photoIndex % variantsLength;
+            return Number(transitionType) % variantsLength;
+          };
+          
+          const currentTransition = getActiveTransition();
+
+          // Base Photo Render
           ctx.save();
-          if (photoElapsed > PHOTO_DURATION - 0.8) {
-            ctx.globalAlpha = 1 - (photoElapsed - (PHOTO_DURATION - 0.8)) / 0.8;
+          
+          // Apply current filter
+          ctx.filter = filterValue;
+
+          // Handle Current Image Exit Transition
+          if (isTransitioning) {
+            if (currentTransition === 0) { // Golden Glimmer
+              ctx.globalAlpha = 1 - transitionProgress;
+              ctx.filter = `${filterValue} brightness(${1 + transitionProgress * 2}) blur(${transitionProgress * 5}px)`;
+            } else if (currentTransition === 1) { // Silk Reveal
+              ctx.save();
+              ctx.translate(-transitionProgress * WIDTH * 0.1, 0);
+              ctx.globalAlpha = 1 - transitionProgress * 0.5;
+            } else if (currentTransition === 2) { // Temple Bloom
+              ctx.globalAlpha = 1 - transitionProgress;
+              ctx.filter = `${filterValue} blur(${transitionProgress * 20}px) brightness(${1 + transitionProgress})`;
+            } else if (currentTransition === 3) { // Diagonal Wipe
+              ctx.globalAlpha = 1 - transitionProgress;
+            } else if (currentTransition === 4) { // Macro Focus
+              ctx.globalAlpha = 1 - transitionProgress;
+            } else { // Classic Fade
+              ctx.globalAlpha = 1 - transitionProgress;
+            }
           }
+
           drawCoverImage(ctx, currentImg, zoom, panX, panY);
+          
+          if (isTransitioning && currentTransition === 1) {
+            ctx.restore();
+          }
           ctx.restore();
 
-          if (photoElapsed > PHOTO_DURATION - 0.8) {
-            const alpha = (photoElapsed - (PHOTO_DURATION - 0.8)) / 0.8;
+          // Handle Next Image Entry Transition
+          if (isTransitioning) {
             ctx.save();
-            ctx.globalAlpha = alpha;
-            drawCoverImage(ctx, nextImg, isZoomIn ? (1.0 + zoomSpeed) : 1.0, isZoomIn ? 7.5 : -7.5, isZoomIn ? -4 : 4);
+            ctx.filter = filterValue;
+            
+            if (currentTransition === 0) { // Golden Glimmer
+              ctx.globalAlpha = transitionProgress;
+              const enterScale = 1.1 - (transitionProgress * 0.1);
+              ctx.filter = `${filterValue} brightness(${2 - transitionProgress}) contrast(1.2)`;
+              drawCoverImage(ctx, nextImg, enterScale, 0, 0);
+            } else if (currentTransition === 1) { // Silk Reveal
+              ctx.globalAlpha = transitionProgress;
+              const enterX = WIDTH * (1 - transitionProgress);
+              // Draw with a slight skew/slide
+              ctx.save();
+              ctx.beginPath();
+              ctx.rect(enterX, 0, WIDTH, HEIGHT);
+              ctx.clip();
+              drawCoverImage(ctx, nextImg, 1.0, 0, 0);
+              ctx.restore();
+            } else if (currentTransition === 2) { // Temple Bloom
+              ctx.globalAlpha = transitionProgress;
+              const bloomBlur = (1 - transitionProgress) * 30;
+              ctx.filter = `${filterValue} blur(${bloomBlur}px) brightness(${1.5 - transitionProgress * 0.5})`;
+              drawCoverImage(ctx, nextImg, 1.05 - transitionProgress * 0.05, 0, 0);
+            } else if (currentTransition === 3) { // Diagonal Wipe
+              ctx.save();
+              ctx.beginPath();
+              // Diagonal polygon wipe
+              ctx.moveTo(WIDTH, 0);
+              ctx.lineTo(WIDTH - (transitionProgress * WIDTH * 2), 0);
+              ctx.lineTo(WIDTH - (transitionProgress * WIDTH * 2) + WIDTH, HEIGHT);
+              ctx.lineTo(WIDTH, HEIGHT);
+              ctx.closePath();
+              ctx.clip();
+              drawCoverImage(ctx, nextImg, 1.0, 0, 0);
+              ctx.restore();
+            } else if (currentTransition === 4) { // Macro Focus
+              ctx.globalAlpha = transitionProgress;
+              const enterScale = 2 - transitionProgress;
+              const enterBlur = (1 - transitionProgress) * 10;
+              ctx.filter = `${filterValue} blur(${enterBlur}px)`;
+              drawCoverImage(ctx, nextImg, enterScale, 0, 0);
+            } else { // Classic Fade
+              ctx.globalAlpha = transitionProgress;
+              drawCoverImage(ctx, nextImg, 1.0, 0, 0);
+            }
+            
             ctx.restore();
           }
 
           ctx.fillStyle = gradTop; ctx.fillRect(0, 0, WIDTH, 400);
           ctx.fillStyle = gradBot; ctx.fillRect(0, HEIGHT - 500, WIDTH, 500);
 
-          const currentText = displayTexts[photoIndex % displayTexts.length];
-          const style = TEXT_STYLES_DATA[photoIndex % TEXT_STYLES_DATA.length];
-          const maxWidth = WIDTH - 160;
+          const currentText = (displayTexts && displayTexts.length > 0) ? displayTexts[photoIndex % displayTexts.length] : "";
+          const config = textConfigs?.[photoIndex % textConfigs.length] || {
+            font: 'serif',
+            color: '#FFFFFF',
+            container: 'bottom-24 inset-x-6 text-center',
+            align: 'center'
+          };
+          const coords = getCoordsFromContainer(config.container);
           
-          ctx.font = aesthetic === 'modern_chic' ? '700 50px sans-serif' : 'italic 50px serif';
-          const lines = wrapText(ctx, currentText, maxWidth);
-          const lineHeight = 60;
-          const totalTextHeight = lines.length * lineHeight;
+          const maxWidth = WIDTH - 200;
           
-          const totalChars = currentText.length;
-          const textStartTime = 0.3;
-          const textDuration = 1.5;
+          ctx.textAlign = config.align as CanvasTextAlign;
+          ctx.fillStyle = config.color; 
+          ctx.font = 'bold 22px Montserrat, sans-serif'; 
+          ctx.letterSpacing = '10px';
+          ctx.globalAlpha = 0.8;
+          
+          const totalChars = currentText?.length || 0;
+          const textStartTime = 0.4;
+          const textDuration = 1.6;
           const charsToShow = Math.floor(Math.max(0, Math.min(1, (photoElapsed - textStartTime) / textDuration)) * totalChars);
           
-          ctx.fillStyle = '#D4AF37'; 
-          ctx.textAlign = style.align as CanvasTextAlign;
-          ctx.font = 'bold 20px sans-serif'; 
-          ctx.letterSpacing = '8px';
+          // Draw primary text with dynamic font
+          ctx.globalAlpha = 1.0;
+          let fontStr = 'italic 54px "Playfair Display", serif';
+          if (config.font === 'sans') fontStr = 'bold 54px Montserrat, sans-serif';
+          if (config.font === 'script') fontStr = 'italic 54px "Playfair Display", serif';
+          if (config.font === 'display') fontStr = 'bold 48px Montserrat, sans-serif';
           
-          const labelY = style.y - (lines.length > 1 ? (totalTextHeight / 2 + 40) : 60);
-          ctx.fillText(style.label, (style.x || WIDTH / 2), labelY);
-          
-          ctx.font = aesthetic === 'modern_chic' ? '700 50px sans-serif' : 'italic 50px serif';
+          ctx.font = fontStr;
           ctx.letterSpacing = 'normal';
+          ctx.shadowColor = 'rgba(0,0,0,0.5)';
+          ctx.shadowBlur = 15;
+          
+          const lines = wrapText(ctx, currentText, maxWidth);
+          const lineHeight = 65;
+          const totalTextHeight = (lines?.length || 0) * lineHeight;
           
           let charCounter = 0;
           lines.forEach((line, index) => {
-            const lineY = style.y + (index * lineHeight) - (lines.length > 1 ? (totalTextHeight / 2 - lineHeight / 2) : 0);
+            const lineY = coords.y + (index * lineHeight) - ((lines?.length || 0) > 1 ? (totalTextHeight / 2 - lineHeight / 2) : 0);
             
             if (charCounter < charsToShow) {
-              const lineChars = Math.min(line.length, charsToShow - charCounter);
-              ctx.fillText(line.substring(0, lineChars), (style.x || WIDTH / 2), lineY);
+              const lineChars = Math.min((line?.length || 0), charsToShow - charCounter);
+              ctx.fillText(line.substring(0, lineChars), coords.x, lineY);
             }
-            charCounter += line.length + 1;
+            charCounter += (line?.length || 0) + 1;
           });
+          
+          ctx.shadowBlur = 0;
 
           if (showWatermark && brandName) {
-            ctx.font = 'bold 16px sans-serif'; 
-            ctx.fillStyle = 'rgba(255,255,255,0.4)';
+            ctx.font = 'bold 18px Montserrat, sans-serif'; 
+            ctx.fillStyle = config.color;
+            ctx.globalAlpha = 0.5;
             ctx.textAlign = 'center'; 
-            ctx.fillText(brandName.toUpperCase(), WIDTH / 2, HEIGHT - 80);
+            ctx.letterSpacing = '12px';
+            ctx.fillText(brandName.toUpperCase(), WIDTH / 2, HEIGHT - 100);
+            ctx.globalAlpha = 1.0;
           }
 
           animationFrameId = requestAnimationFrame(renderLoop);

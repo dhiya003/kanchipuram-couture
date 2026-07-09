@@ -67,57 +67,75 @@ body {
     filter: blur(80px);
     mix-blend-mode: color-dodge;
   }
+
+  .luxury-vignette {
+    box-shadow: inset 0 0 120px rgba(0,0,0,0.6);
+  }
+
+  .gold-shimmer-bg {
+    background: linear-gradient(135deg, #100c08 0%, #1a1510 100%);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .gold-shimmer-bg::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at 50% 50%, rgba(212, 175, 55, 0.05), transparent);
+    animation: pulse-gold 4s infinite alternate;
+  }
 }
 
-@keyframes light-leak-drift {
-  0% { transform: translate(-30%, -30%) rotate(0deg); opacity: 0.3; }
-  50% { transform: translate(10%, 10%) rotate(180deg); opacity: 0.6; }
-  100% { transform: translate(-30%, -30%) rotate(360deg); opacity: 0.3; }
+@keyframes pulse-gold {
+  from { opacity: 0.3; transform: scale(1); }
+  to { opacity: 0.7; transform: scale(1.2); }
 }
 
-.animate-light-leak {
-  animation: light-leak-drift 15s infinite linear;
+@keyframes sweep-curtain {
+  0% { transform: translateY(100%); }
+  100% { transform: translateY(-100%); }
 }
 
-/* AI Powered Visual Filters */
-.aesthetic-royal-palace {
-  box-shadow: inset 0 0 100px rgba(212, 175, 55, 0.15);
-}
-
-.aesthetic-royal-palace::after {
-  content: '';
-  position: absolute;
+.curtain-overlay {
+  position: fixed;
   inset: 0;
-  background: radial-gradient(circle at center, transparent 30%, rgba(212, 175, 55, 0.05) 100%);
+  background: var(--color-saree-maroon);
+  z-index: 1000;
   pointer-events: none;
+  transform: translateY(100%);
+}
+
+.curtain-active {
+  animation: sweep-curtain 1.2s cubic-bezier(0.7, 0, 0.3, 1) forwards;
+}
+
+@keyframes float-text {
+  0% { transform: translateY(5px); opacity: 0.8; }
+  100% { transform: translateY(-5px); opacity: 1; }
+}
+
+.animate-float-luxury {
+  animation: float-text 3s infinite alternate ease-in-out;
+}
+
+/* AI Powered Visual Filters Override */
+.aesthetic-royal-palace {
+  filter: sepia(0.2) contrast(1.1) brightness(1.05);
+  box-shadow: inset 0 0 100px rgba(212, 175, 55, 0.2);
 }
 
 .aesthetic-temple-aura {
-  box-shadow: inset 0 0 150px rgba(0, 0, 0, 0.4);
-}
-
-.aesthetic-temple-aura::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(to bottom, rgba(255, 200, 100, 0.1) 0%, transparent 60%);
-  pointer-events: none;
-}
-
-.aesthetic-modern-chic {
-  padding: 20px;
-  background: white;
-}
-
-.aesthetic-modern-chic .photo-container {
-  box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+  filter: contrast(1.2) saturate(0.8) brightness(0.9);
+  box-shadow: inset 0 0 150px rgba(0, 0, 0, 0.5);
 }
 
 .aesthetic-vintage-cinema {
-  /* standard grain + leaks already handled but can add more */
+  filter: sepia(0.4) contrast(0.9) brightness(1.1);
+}
+
+.aesthetic-modern-chic {
+  filter: contrast(1.1) saturate(1.1);
 }
 
 .aesthetic-bloom {

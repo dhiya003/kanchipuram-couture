@@ -1,6 +1,6 @@
 # Saree Analysis Prompt
 
-This prompt is used by `gemini-2.0-flash` to analyze uploaded saree photos and generate high-conversion marketing content.
+This prompt is used by `gemini-3-flash-preview` to analyze uploaded saree photos and generate high-conversion marketing content.
 
 ## Prompt Text
 

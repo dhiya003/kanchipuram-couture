@@ -5,13 +5,14 @@
 
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Sparkles, ChevronRight, ChevronLeft, Instagram, Camera, Music as MusicIcon, History, Settings, Crown, Gem, Flower2 } from 'lucide-react';
-import { AppState, Photo, Song, Reel } from './types';
+import { Sparkles, ChevronRight, ChevronLeft, Instagram, Camera, Music as MusicIcon, History, Settings, Crown, Gem, Flower2, Image as ImageIcon, Wand2 } from 'lucide-react';
+import { AppState, Photo, Song, Reel, TextConfig } from './types';
 import PhotoUploader from './components/PhotoUploader';
 import MusicSelector, { SOUTHERN_CLASSICS } from './components/MusicSelector';
 import ReelPreview from './components/ReelPreview';
 import VideoExporter from './components/VideoExporter';
 import HistoryView from './components/HistoryView';
+import PoseStudio from './components/PoseStudio';
 import { db as historyDb, urlToBase64, base64ToBlobUrl } from './lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 
@@ -60,6 +61,8 @@ export default function App() {
   const [selectedSong, setSelectedSong] = useState<Song>();
   const [selectedTransition, setSelectedTransition] = useState<number | 'auto'>('auto');
   const [storyTexts, setStoryTexts] = useState<string[]>(DEFAULT_STORY_TEXTS);
+  const [storyConfigs, setStoryConfigs] = useState<TextConfig[]>([]);
+  const [selectedFilter, setSelectedFilter] = useState<string>('none');
   const [instagramCaption, setInstagramCaption] = useState<string>('');
   const [selectedAesthetic, setSelectedAesthetic] = useState<string>('vintage_cinema');
   const [brandName, setBrandName] = useState(() => {
@@ -135,37 +138,69 @@ export default function App() {
     setIsAnalyzing(true);
     setAnalysisProgress(5);
     setAnalysisStep('Observing fabric textures...');
-    setVideoUrl(null); // Reset video URL on new analysis
+    setVideoUrl(null); 
+    
     try {
-      // Prepare images for Gemini - parallel fetch
-      setAnalysisProgress(15);
-      const imageParts = await Promise.all(
-        photos.slice(0, 4).map(async (p, idx) => {
+      // Prepare images for Gemini
+      const imageCount = Math.min(photos.length, 4);
+      const imageParts = [];
+      
+      for (let i = 0; i < imageCount; i++) {
+        const p = photos[i];
+        setAnalysisStep(`Analyzing weave ${i + 1}/${imageCount}...`);
+        
+        try {
           const response = await fetch(p.url);
+          if (!response.ok) throw new Error("Fetch failed");
           const blob = await response.blob();
-          const base64 = await new Promise<string>((resolve) => {
+          
+          const base64 = await new Promise<string>((resolve, reject) => {
             const reader = new FileReader();
-            reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+            reader.onloadend = () => {
+              const res = reader.result as string;
+              if (res) resolve(res.split(',')[1]);
+              else reject("Reader empty");
+            };
+            reader.onerror = reject;
             reader.readAsDataURL(blob);
           });
-          setAnalysisProgress(prev => Math.min(prev + 10, 50));
-          return {
+          
+          imageParts.push({
             inlineData: {
               data: base64,
-              mimeType: blob.type
+              mimeType: blob.type || "image/jpeg"
             }
-          };
-        })
-      );
+          });
+          
+          setAnalysisProgress(10 + (i + 1) * (40 / imageCount));
+        } catch (err) {
+          console.warn(`Failed to process image ${i}:`, err);
+        }
+      }
+
+      if (imageParts.length === 0) throw new Error("No images processed");
 
       setAnalysisStep('Crafting poetic fragments...');
       setAnalysisProgress(60);
 
       const prompt = `Analyze these saree photos. User notes: ${customNotes || "none"}.
-      You are a luxury fashion curator and poetic storyteller. Generate:
-      1. 10 unique, cinematic reel captions (under 35 chars each).
-      2. A visual aesthetic: 'vintage_cinema', 'royal_palace', 'temple_aura', or 'modern_chic'.
-      3. A premium Instagram caption following the "NIVRA HIGH-CONVERSION CAPTION STRUCTURE".
+      You are a luxury fashion curator and poetic storyteller. Generate exactly 10 unique, cinematic reel captions (under 35 chars each).
+      Ensure each caption is distinct and tells a progressive story (e.g., from fabric details to emotional payoff).
+      
+      1. Cap 1: The mood/vibe
+      2. Cap 2: Fabric/Texture detail
+      3. Cap 3: Artistic detail/Weave
+      4. Cap 4: Moving into elegance
+      5. Cap 5: Heritage connection
+      6. Cap 6: Emotional appeal
+      7. Cap 7: Stylistic flair
+      8. Cap 8: The "Grand" feel
+      9. Cap 9: Timeless aspect
+      10. Cap 10: Final brand sign-off line
+
+      Also generate:
+      - A visual aesthetic: 'vintage_cinema', 'royal_palace', 'temple_aura', or 'modern_chic'.
+      - A premium Instagram caption following the "NIVRA HIGH-CONVERSION CAPTION STRUCTURE".
 
       NIVRA CAPTION RULES:
       - First lines MUST be an SEO Hook: [Fabric] + [Color] + [Occasion] + [Emotion]
@@ -184,20 +219,12 @@ export default function App() {
         "instagramCaption": "string"
       }`;
 
-      console.log("Starting saree analysis with model: gemini-2.0-flash");
+      console.log("Requesting AI Analysis with model: gemini-3-flash-preview");
       const ai = getAI();
       const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
+        model: "gemini-3-flash-preview",
         contents: {
-          parts: [
-            ...imageParts.map(p => ({
-              inlineData: {
-                data: p.inlineData.data,
-                mimeType: p.inlineData.mimeType
-              }
-            })),
-            { text: prompt }
-          ]
+          parts: [...imageParts, { text: prompt }]
         },
         config: {
           responseMimeType: "application/json",
@@ -207,15 +234,15 @@ export default function App() {
               captions: {
                 type: Type.ARRAY,
                 items: { type: Type.STRING },
-                description: "3-5 short aesthetic captions for story slides"
+                description: "Exactly 10 unique aesthetic captions"
               },
               aesthetic: {
                 type: Type.STRING,
-                description: "One of internal aesthetic IDs: vintage_cinema, royal_palace, temple_aura, modern_chic"
+                description: "One of aesthetic IDs"
               },
               instagramCaption: {
                 type: Type.STRING,
-                description: "Full premium Instagram caption following high-conversion structure"
+                description: "Full Instagram caption"
               }
             },
             required: ["captions", "aesthetic", "instagramCaption"]
@@ -223,22 +250,25 @@ export default function App() {
         }
       });
 
-      setAnalysisProgress(90);
-      setAnalysisStep('Finalizing curation...');
+      const textOutput = response.text;
+      if (!textOutput) throw new Error("No response from AI");
+      
+      const data = JSON.parse(textOutput.replace(/```json\n?|```/g, '').trim());
+      
+      if (data.captions && data.captions.length >= 3) {
+        setStoryTexts(data.captions);
+      } else {
+        console.warn("AI returned invalid captions, using defaults");
+      }
 
-      const cleanedText = response.text.replace(/```json\n?|```/g, '').trim();
-      const data = JSON.parse(cleanedText);
-      if (data.captions) setStoryTexts(data.captions);
       if (data.aesthetic) setSelectedAesthetic(data.aesthetic);
       if (data.instagramCaption) setInstagramCaption(data.instagramCaption);
       
       setAnalysisProgress(100);
     } catch (error) {
-      console.error("AI Analysis Failed", error);
-      // Fallback to defaults if AI fails
+      console.error("AI Analysis Failed:", error);
+      // Fallback is implicit via keeping storyTexts as they are (or setting defaults)
       setStoryTexts([...DEFAULT_STORY_TEXTS]);
-      setInstagramCaption("Experience the timeless elegance of Kanchipuram silk. Handcrafted with passion, draped in tradition. #SareeHeritage #KanchipuramCouture #SilkSaree");
-      setSelectedAesthetic('vintage_cinema');
     } finally {
       setIsAnalyzing(false);
       setAnalysisProgress(0);
@@ -255,15 +285,24 @@ export default function App() {
     }
   };
 
+  const [curtainActive, setCurtainActive] = useState(false);
+
+  const triggerStepChange = (targetState: AppState, action?: () => void) => {
+    setCurtainActive(true);
+    setTimeout(() => {
+      if (action) action();
+      setState(targetState);
+    }, 600); // Middle of animation
+    setTimeout(() => setCurtainActive(false), 1200);
+  };
+
   const nextStep = () => {
     if (state === 'landing') {
-      resetApp();
-      setState('upload');
+      triggerStepChange('upload', resetApp);
     }
     else if (state === 'upload') analyzeSarees();
     else if (state === 'music') {
-      setState('preview');
-      startExport();
+      triggerStepChange('preview', startExport);
     }
     else if (state === 'preview') {
       startExport();
@@ -271,16 +310,16 @@ export default function App() {
   };
 
   const prevStep = () => {
-    if (state === 'upload') setState('landing');
-    else if (state === 'music') setState('upload');
+    if (state === 'upload') triggerStepChange('landing');
+    else if (state === 'music') triggerStepChange('upload');
     else if (state === 'preview') {
       if (musicEnabled) {
-        setState('music');
+        triggerStepChange('music');
       } else {
-        setState('upload');
+        triggerStepChange('upload');
       }
     }
-    else if (state === 'history') setState('landing');
+    else if (state === 'history') triggerStepChange('landing');
   };
 
   useEffect(() => {
@@ -296,10 +335,10 @@ export default function App() {
   // Reset video when creative settings change
   useEffect(() => {
     if (videoUrl) {
-      console.log("Creative settings changed, resetting prepared video.");
+      console.log("Creative settings changed or story updated, resetting prepared video.");
       setVideoUrl(null);
     }
-  }, [selectedSong, selectedTransition, selectedAesthetic]);
+  }, [selectedSong, selectedTransition, selectedAesthetic, storyTexts]);
 
   useEffect(() => {
     return () => {
@@ -335,8 +374,11 @@ export default function App() {
       photos: persistentPhotos,
       song: selectedSong,
       texts: [...storyTexts],
+      textConfigs: [...storyConfigs],
+      filter: selectedFilter,
       aesthetic: selectedAesthetic,
-      transitionType: selectedTransition
+      transitionType: selectedTransition,
+      instagramCaption: instagramCaption
     };
     
     await historyDb.reels.add(newReel);
@@ -359,7 +401,10 @@ export default function App() {
     setPhotos(hydratedPhotos);
     setSelectedSong(reel.song);
     if (reel.texts) setStoryTexts(reel.texts);
+    if (reel.textConfigs) setStoryConfigs(reel.textConfigs);
+    if (reel.filter) setSelectedFilter(reel.filter);
     if (reel.aesthetic) setSelectedAesthetic(reel.aesthetic);
+    if (reel.instagramCaption !== undefined) setInstagramCaption(reel.instagramCaption);
     setSelectedTransition(reel.transitionType ?? 'auto');
     setVideoUrl(null); 
     setState('preview');
@@ -370,7 +415,10 @@ export default function App() {
     setPhotos(hydratedPhotos);
     setSelectedSong(reel.song);
     if (reel.texts) setStoryTexts(reel.texts);
+    if (reel.textConfigs) setStoryConfigs(reel.textConfigs);
+    if (reel.filter) setSelectedFilter(reel.filter);
     if (reel.aesthetic) setSelectedAesthetic(reel.aesthetic);
+    if (reel.instagramCaption !== undefined) setInstagramCaption(reel.instagramCaption);
     setSelectedTransition(reel.transitionType ?? 'auto');
     setVideoUrl(null);
     setState('preview');
@@ -383,6 +431,9 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col relative overflow-hidden bg-saree-paper">
+      {/* Cinematic Curtain */}
+      <div className={`curtain-overlay ${curtainActive ? 'curtain-active' : ''}`} />
+
       {/* Decorative Elements */}
       <div className="absolute -top-24 -right-24 w-96 h-96 bg-saree-gold/5 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-saree-maroon/5 rounded-full blur-3xl pointer-events-none" />
@@ -514,55 +565,66 @@ export default function App() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-0 z-[100] bg-saree-paper/95 backdrop-blur-sm flex flex-col items-center justify-center text-center p-8"
+              className="absolute inset-0 z-[100] gold-shimmer-bg glass-panel flex flex-col items-center justify-center text-center p-8"
             >
-              <div className="w-24 h-24 relative mb-12">
+              <div className="w-32 h-32 relative mb-16">
                 <motion.div 
                   animate={{ rotate: 360 }}
-                  transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
-                  className="absolute inset-0 border-t-2 border-saree-gold rounded-full"
+                  transition={{ duration: 6, repeat: Infinity, ease: "linear" }}
+                  className="absolute inset-0 border-t border-saree-gold rounded-full opacity-40 shadow-[0_0_20px_rgba(212,175,55,0.2)]"
                 />
                 <motion.div 
-                   animate={{ scale: [1, 1.1, 1] }}
-                   transition={{ duration: 2, repeat: Infinity }}
+                  animate={{ rotate: -360 }}
+                  transition={{ duration: 8, repeat: Infinity, ease: "linear" }}
+                  className="absolute inset-4 border-b border-saree-gold/30 rounded-full"
+                />
+                <motion.div 
+                   animate={{ scale: [1, 1.05, 1], opacity: [0.7, 1, 0.7] }}
+                   transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
                    className="absolute inset-0 flex items-center justify-center"
                 >
-                  <Sparkles className="w-8 h-8 text-saree-gold animate-pulse" />
+                  <Crown className="w-12 h-12 text-saree-gold drop-shadow-[0_0_15px_rgba(212,175,55,0.5)]" />
                 </motion.div>
                 
                 {/* Visual Progress Ring */}
-                <svg className="absolute -inset-4 w-32 h-32 rotate-[-90deg]">
+                <svg className="absolute -inset-6 w-44 h-44 rotate-[-90deg]">
                   <circle
-                    cx="64"
-                    cy="64"
-                    r="60"
+                    cx="88"
+                    cy="88"
+                    r="84"
                     fill="transparent"
                     stroke="currentColor"
-                    strokeWidth="2"
-                    strokeDasharray={2 * Math.PI * 60}
-                    strokeDashoffset={2 * Math.PI * 60 * (1 - analysisProgress / 100)}
-                    className="text-saree-gold/20"
+                    strokeWidth="1"
+                    strokeDasharray={2 * Math.PI * 84}
+                    strokeDashoffset={2 * Math.PI * 84 * (1 - analysisProgress / 100)}
+                    className="text-saree-gold/30"
                   />
                 </svg>
               </div>
               
-              <div className="space-y-4">
-                <h3 className="display-text text-2xl text-saree-maroon italic">{analysisStep || 'Curating Your Heritage Story...'}</h3>
-                <div className="w-64 h-1 bg-stone-100 rounded-full mx-auto overflow-hidden">
+              <div className="space-y-6">
+                <h3 className="display-text text-3xl text-saree-gold italic drop-shadow-sm">{analysisStep || 'Curating Your Heritage Story...'}</h3>
+                <div className="w-72 h-1 bg-white/5 rounded-full mx-auto overflow-hidden border border-saree-gold/10">
                   <motion.div 
-                    className="h-full bg-saree-gold"
+                    className="h-full bg-gradient-to-r from-saree-gold/40 via-saree-gold to-saree-gold/40"
                     initial={{ width: 0 }}
                     animate={{ width: `${analysisProgress}%` }}
+                    transition={{ duration: 0.5 }}
                   />
                 </div>
-                <p className="serif-text text-[10px] uppercase tracking-[0.2em] text-saree-gold font-bold">
-                  {Math.round(analysisProgress)}% Processed
+                <p className="serif-text text-[12px] uppercase tracking-[0.4em] text-saree-gold/60 font-bold">
+                  Phase {analysisProgress < 40 ? 'I' : analysisProgress < 80 ? 'II' : 'III'} — {Math.round(analysisProgress)}%
                 </p>
-                <p className="serif-text text-gray-500 max-w-xs mx-auto text-xs">
-                  {analysisProgress < 40 && "Identifying yarn patterns and silk weaves..."}
+                <motion.p 
+                  key={analysisStep}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="serif-text text-gray-400 max-w-xs mx-auto text-sm leading-relaxed"
+                >
+                  {analysisProgress < 40 && "Identifying ancient yarn patterns and silk weaves..."}
                   {analysisProgress >= 40 && analysisProgress < 80 && "Translating visual elegance into poetic verses..."}
-                  {analysisProgress >= 80 && "Polishing your brand's digital presence..."}
-                </p>
+                  {analysisProgress >= 80 && "Polishing your brand's digital presence for the world..."}
+                </motion.p>
               </div>
             </motion.div>
           )}
@@ -595,7 +657,7 @@ export default function App() {
                     <Sparkles className="w-6 h-6 text-stone-950" />
                   </div>
                 </motion.div>
-
+                
                 <div className="space-y-4">
                   <motion.span 
                     initial={{ opacity: 0 }}
@@ -606,35 +668,69 @@ export default function App() {
                     Est. 1924 • Handcrafted Heritage
                   </motion.span>
                   <h2 className="text-6xl md:text-8xl display-text font-medium leading-[1.1] text-saree-ink">
-                    Crafting <span className="text-saree-maroon italic">Stories</span> <br />
-                    in <span className="relative">
-                      Silk
-                      <svg className="absolute -bottom-2 left-0 w-full h-2 text-saree-gold/30" viewBox="0 0 100 10" preserveAspectRatio="none">
-                        <path d="M0 5 Q 25 0 50 5 T 100 5" fill="none" stroke="currentColor" strokeWidth="2" />
-                      </svg>
-                    </span>
+                    The Art of <span className="text-saree-maroon italic block md:inline mt-4 md:mt-0">Presentation</span>
                   </h2>
-                  <p className="max-w-xl mx-auto text-lg serif-text text-gray-500 leading-relaxed pt-2">
-                    Transform your masterpiece photography into cinematic bridal journeys. 
-                    An elite reel studio for the modern heritage weaver.
+                  <p className="max-w-xl mx-auto text-lg serif-text text-gray-500 leading-relaxed pt-2 px-4">
+                    Transform your weaver's craft into digital masterpieces. Choose your studio journey.
                   </p>
                 </div>
               </div>
 
-              <div className="flex flex-col items-center gap-6">
+              <div className="grid md:grid-cols-2 gap-6 max-w-3xl mx-auto px-4">
                 <button 
                   onClick={nextStep}
-                  className="px-12 py-5 rounded-full bg-saree-ink text-saree-paper flex items-center gap-4 text-sm uppercase tracking-widest font-bold hover:bg-saree-maroon transition-all shadow-xl group"
+                  className="p-8 rounded-[2rem] bg-white border border-saree-gold/20 shadow-xl hover:shadow-2xl hover:border-saree-gold transition-all text-left flex flex-col group relative overflow-hidden"
                 >
-                  Begin Curation
-                  <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                  <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:scale-110 transition-transform">
+                    <Crown className="w-24 h-24 text-saree-maroon" />
+                  </div>
+                  <div className="w-12 h-12 rounded-xl bg-saree-gold/10 flex items-center justify-center mb-6 text-saree-gold">
+                    <ImageIcon className="w-6 h-6" />
+                  </div>
+                  <h3 className="display-text text-2xl text-saree-maroon mb-2">Cinematic Reels</h3>
+                  <p className="text-sm text-gray-500 serif-text mb-6">Create 10-slide bridal showcases with music and poetic overlays.</p>
+                  <span className="mt-auto flex items-center gap-2 text-[10px] uppercase tracking-widest font-bold text-saree-gold">
+                    Enter Studio <ChevronRight className="w-3 h-3 group-hover:translate-x-1 transition-transform" />
+                  </span>
                 </button>
+
+                <button 
+                  onClick={() => triggerStepChange('pose_studio')}
+                  className="p-8 rounded-[2rem] bg-saree-ink text-white border border-white/10 shadow-xl hover:shadow-2xl hover:border-saree-gold/40 transition-all text-left flex flex-col group relative overflow-hidden"
+                >
+                  <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:scale-110 transition-transform">
+                    <Sparkles className="w-24 h-24 text-saree-gold" />
+                  </div>
+                  <div className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center mb-6 text-saree-gold">
+                    <Wand2 className="w-6 h-6" />
+                  </div>
+                  <h3 className="display-text text-2xl text-saree-paper mb-2">Pose Studio</h3>
+                  <p className="text-sm text-gray-400 serif-text mb-6 italic">Re-imagine any saree in our signature pleated presentation pose.</p>
+                  <span className="mt-auto flex items-center gap-2 text-[10px] uppercase tracking-widest font-bold text-saree-gold">
+                    Open Lab <ChevronRight className="w-3 h-3 group-hover:translate-x-1 transition-transform" />
+                  </span>
+                </button>
+              </div>
+
+              <div className="flex flex-col items-center gap-4 pt-4">
                 <div className="flex items-center gap-8 text-saree-gold/40">
                   <Instagram className="w-5 h-5" />
-                  <div className="w-px h-10 bg-saree-gold/20" />
-                  <span className="text-[10px] uppercase tracking-widest font-bold">Optimized for Reels</span>
+                  <div className="w-px h-6 bg-saree-gold/20" />
+                  <span className="text-[10px] uppercase tracking-widest font-bold">Optimized for Instagram</span>
                 </div>
               </div>
+            </motion.div>
+          )}
+
+          {state === 'pose_studio' && (
+            <motion.div 
+              key="pose_studio"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 1.05 }}
+              className="w-full h-full"
+            >
+              <PoseStudio onBack={() => triggerStepChange('landing')} />
             </motion.div>
           )}
 
@@ -679,7 +775,11 @@ export default function App() {
                 photos={photos} 
                 song={musicEnabled ? (selectedSong || SOUTHERN_CLASSICS[0]) : null} 
                 storyTexts={storyTexts}
+                storyConfigs={storyConfigs}
                 onTextChange={setStoryTexts}
+                onConfigsChange={setStoryConfigs}
+                filter={selectedFilter}
+                onFilterChange={setSelectedFilter}
                 instagramCaption={instagramCaption}
                 onInstagramCaptionChange={setInstagramCaption}
                 onBack={() => setState('music')}
@@ -704,6 +804,8 @@ export default function App() {
                   photos={photos} 
                   song={musicEnabled ? (selectedSong || null) : null} 
                   texts={storyTexts} 
+                  textConfigs={storyConfigs}
+                  filter={selectedFilter}
                   transitionType={selectedTransition}
                   aesthetic={selectedAesthetic}
                   brandName={brandName}
