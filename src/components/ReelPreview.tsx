@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Photo, Song, TextConfig } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { Play, Pause, RefreshCcw, Share2, Download, Copy, Check, Instagram, PenSquare, Loader2, Sparkles, Type as TypeIcon, Palette, Move, AlignLeft, AlignCenter, AlignRight, Sliders } from 'lucide-react';
+import { Play, Pause, RefreshCcw, Share2, Download, Copy, Check, Instagram, PenSquare, Loader2, Sparkles, Type as TypeIcon, Palette, Move, AlignLeft, AlignCenter, AlignRight, Sliders, ExternalLink } from 'lucide-react';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { Capacitor } from '@capacitor/core';
+import { googleSignIn, getAccessToken } from '../lib/firebase';
+import { getOrCreateCoutureFolder, uploadFileToDrive } from '../lib/drive';
 
 interface ReelPreviewProps {
   photos: Photo[];
@@ -134,8 +136,91 @@ export default function ReelPreview({
   const [isEditingCaption, setIsEditingCaption] = useState(false);
   const [activeTab, setActiveTab] = useState<'text' | 'visuals' | 'typography' | 'grading'>('visuals');
   
+  // Google Drive state
+  const [isSavingToDrive, setIsSavingToDrive] = useState(false);
+  const [driveSaveSuccess, setDriveSaveSuccess] = useState(false);
+  const [driveSaveError, setDriveSaveError] = useState<string | null>(null);
+  const [driveFileUrl, setDriveFileUrl] = useState<string | null>(null);
+  const [copiedDriveLink, setCopiedDriveLink] = useState(false);
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    setDriveFileUrl(null);
+  }, [videoUrl]);
+
+  const handleDriveExport = async () => {
+    if (!videoUrl) return;
+
+    setIsSavingToDrive(true);
+    setDriveSaveSuccess(false);
+    setDriveSaveError(null);
+
+    try {
+      let token = getAccessToken();
+      if (!token) {
+        const result = await googleSignIn();
+        if (result) {
+          token = result.accessToken;
+        } else {
+          throw new Error("Google Authentication is required to upload to Drive.");
+        }
+      }
+
+      // Fetch the generated video blob
+      const response = await fetch(videoUrl);
+      const blob = await response.blob();
+
+      let uploadBlob = blob;
+
+      // Since browser-native MediaRecorder is WebM, transcode it server-side to high-compat standard H.264 MP4
+      console.log("Transcoding source video to H.264 MP4 for maximum Google Drive compatibility...");
+      
+      const reader = new FileReader();
+      const base64Data = await new Promise<string>((resolve, reject) => {
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+
+      const transcodeRes = await fetch("/api/transcode", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ videoData: base64Data }),
+      });
+
+      if (!transcodeRes.ok) {
+        throw new Error(`MP4 Transcoder returned error status ${transcodeRes.status}`);
+      }
+
+      const transcodeResult = await transcodeRes.json();
+      if (transcodeResult.videoData) {
+        const transcodeResponse = await fetch(transcodeResult.videoData);
+        uploadBlob = await transcodeResponse.blob();
+        console.log("Server-side H.264 MP4 transcoding succeeded!");
+      } else {
+        throw new Error("Transcoding failed: server response missing videoData");
+      }
+
+      const folderId = await getOrCreateCoutureFolder(token, 'Kanchipuram Couture');
+      const filename = `Kanchipuram_Saree_Reel_${Date.now()}.mp4`;
+      const fileData = await uploadFileToDrive(token, uploadBlob, filename, folderId);
+
+      const driveUrl = `https://drive.google.com/file/d/${fileData.id}/view?usp=drivesdk`;
+      setDriveFileUrl(driveUrl);
+      setDriveSaveSuccess(true);
+      setTimeout(() => setDriveSaveSuccess(false), 3000);
+    } catch (err: any) {
+      console.error("Drive upload failed:", err);
+      setDriveSaveError(err.message || "Failed to save video to Google Drive.");
+      setTimeout(() => setDriveSaveError(null), 5000);
+    } finally {
+      setIsSavingToDrive(false);
+    }
+  };
 
   // Initialize configs if empty
   useEffect(() => {
@@ -892,14 +977,91 @@ export default function ReelPreview({
             </div>
           </div>
           
+          {driveSaveError && (
+            <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-red-600 text-xs font-semibold text-center">
+              {driveSaveError}
+            </div>
+          )}
+
           {videoUrl && !isExporting ? (
-            <button 
-              onClick={handleDownload}
-              className="w-full py-5 rounded-2xl flex items-center justify-center gap-3 font-bold uppercase tracking-widest transition-all shadow-xl active:scale-95 group bg-saree-gold text-stone-950 hover:bg-saree-gold/90 shadow-saree-gold/20"
-            >
-              {Capacitor.isNativePlatform() ? <Share2 className="w-5 h-5 animate-pulse" /> : <Download className="w-5 h-5 animate-bounce" />}
-              {Capacitor.isNativePlatform() ? 'Save / Share Reel' : 'Download Reel'}
-            </button>
+            <div className="space-y-4 w-full">
+              <div className="grid grid-cols-2 gap-4 w-full">
+                <button 
+                  onClick={handleDownload}
+                  className="py-5 rounded-2xl flex items-center justify-center gap-3 font-bold uppercase tracking-widest transition-all shadow-xl active:scale-95 group bg-saree-gold text-stone-950 hover:bg-saree-gold/90 shadow-saree-gold/20"
+                >
+                  {Capacitor.isNativePlatform() ? <Share2 className="w-5 h-5" /> : <Download className="w-5 h-5" />}
+                  {Capacitor.isNativePlatform() ? 'Save/Share' : 'Download'}
+                </button>
+                
+                <button 
+                  onClick={handleDriveExport}
+                  disabled={isSavingToDrive}
+                  className="py-5 rounded-2xl flex items-center justify-center gap-3 font-bold uppercase tracking-widest transition-all shadow-xl active:scale-95 group bg-stone-900 border border-saree-gold/30 text-saree-gold hover:bg-stone-950 disabled:opacity-55"
+                >
+                  {isSavingToDrive ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : driveSaveSuccess ? (
+                    <Check className="w-5 h-5 text-green-500" />
+                  ) : (
+                    <svg className="w-5 h-5 fill-current text-saree-gold" viewBox="0 0 24 24">
+                      <path d="M19.345 9.176l-5.69-9.176h-3.31l5.69 9.176h3.31zm-6.855-9.176h-1l-7.49 12.824h1l7.49-12.824zm-.5 13.824l-1.85-3.176h-5.14l1.85 3.176h5.14zm9.355.176l-1.85-3.176h-5.14l1.85 3.176h5.14z"/>
+                    </svg>
+                  )}
+                  {driveSaveSuccess ? 'Saved!' : 'Save Drive'}
+                </button>
+              </div>
+
+              {driveFileUrl && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="p-5 rounded-2xl bg-saree-gold/5 border border-saree-gold/20 flex flex-col gap-3 text-center"
+                >
+                  <div className="flex items-center justify-center gap-2 text-saree-gold font-bold text-xs uppercase tracking-widest">
+                    <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                      <path d="M19.345 9.176l-5.69-9.176h-3.31l5.69 9.176h3.31zm-6.855-9.176h-1l-7.49 12.824h1l7.49-12.824zm-.5 13.824l-1.85-3.176h-5.14l1.85 3.176h5.14zm9.355.176l-1.85-3.176h-5.14l1.85 3.176h5.14z"/>
+                    </svg>
+                    Google Drive Link Ready
+                  </div>
+                  <p className="text-stone-500 text-[11px] leading-relaxed">
+                    Your luxury heritage MP4 video has been uploaded. View or share it directly from Google Drive:
+                  </p>
+                  <div className="flex gap-2 w-full mt-1">
+                    <a 
+                      href={driveFileUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 py-3 px-4 rounded-xl bg-saree-maroon text-white font-bold text-xs uppercase tracking-widest hover:bg-saree-ink transition-all flex items-center justify-center gap-2 shadow-sm"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      View Video
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(driveFileUrl);
+                        setCopiedDriveLink(true);
+                        setTimeout(() => setCopiedDriveLink(false), 3000);
+                      }}
+                      className="px-4 py-3 rounded-xl bg-stone-900 border border-saree-gold/20 text-saree-gold font-bold text-xs uppercase tracking-widest hover:bg-stone-950 transition-all flex items-center justify-center gap-2 min-w-[120px]"
+                    >
+                      {copiedDriveLink ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-green-500" />
+                          Copied!
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          Copy Link
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </div>
           ) : (
             <button 
               disabled={true}

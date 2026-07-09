@@ -1,8 +1,11 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Upload, Wand2, X, Download, RefreshCw, Crown, Sparkles, ChevronLeft, Image as ImageIcon } from 'lucide-react';
+import { Upload, Wand2, X, Download, RefreshCw, Crown, Sparkles, ChevronLeft, Image as ImageIcon, Check } from 'lucide-react';
 import { Photo } from '../types';
 import { GoogleGenAI, Type } from "@google/genai";
+import DriveBrowserModal from './DriveBrowserModal';
+import { googleSignIn, getAccessToken } from '../lib/firebase';
+import { getOrCreateCoutureFolder, uploadFileToDrive } from '../lib/drive';
 
 interface PoseStudioProps {
   onBack: () => void;
@@ -53,6 +56,55 @@ export default function PoseStudio({ onBack }: PoseStudioProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [currentProcessingIndex, setCurrentProcessingIndex] = useState(-1);
   const [status, setStatus] = useState('');
+
+  // Google Drive state
+  const [isDriveOpen, setIsDriveOpen] = useState(false);
+  const [uploadingToDriveId, setUploadingToDriveId] = useState<string | null>(null);
+  const [driveUploadSuccess, setDriveUploadSuccess] = useState<string | null>(null);
+  const [driveError, setDriveError] = useState<string | null>(null);
+
+  const handleDriveImport = (drivePhotos: Photo[]) => {
+    setSourceImages(prev => [...prev, ...drivePhotos]);
+    setResults([]); // Clear results on new import
+  };
+
+  const exportToDrive = async (sourceId: string, dataUrl: string, idx: number) => {
+    setUploadingToDriveId(sourceId);
+    setDriveUploadSuccess(null);
+    setDriveError(null);
+
+    try {
+      let token = getAccessToken();
+      if (!token) {
+        const result = await googleSignIn();
+        if (result) {
+          token = result.accessToken;
+        } else {
+          throw new Error("Google Authentication is required to upload to Drive.");
+        }
+      }
+
+      // Convert image base64 URL to Blob
+      const res = await fetch(dataUrl);
+      const blob = await res.blob();
+
+      // Resolve or create folder
+      const folderId = await getOrCreateCoutureFolder(token, 'Kanchipuram Couture');
+
+      // Upload
+      const filename = `Signature_Saree_Pose_${idx + 1}.png`;
+      await uploadFileToDrive(token, blob, filename, folderId);
+
+      setDriveUploadSuccess(sourceId);
+      setTimeout(() => setDriveUploadSuccess(null), 3000);
+    } catch (err: any) {
+      console.error("Upload to Drive failed:", err);
+      setDriveError(err.message || "Failed to save file to Google Drive.");
+      setTimeout(() => setDriveError(null), 5000);
+    } finally {
+      setUploadingToDriveId(null);
+    }
+  };
 
   const getAI = () => {
     let apiKey = '';
@@ -222,6 +274,12 @@ COMMAND: Generate the image of the SAME saree described above, but re-arranged i
               {sourceImages.length} IMAGES
             </span>
           </div>
+
+          {driveError && (
+            <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-red-600 text-xs font-semibold">
+              {driveError}
+            </div>
+          )}
           
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {sourceImages.map((img) => (
@@ -249,11 +307,23 @@ COMMAND: Generate the image of the SAME saree described above, but re-arranged i
             ))}
             
             <button 
+              type="button"
               onClick={() => document.getElementById('pose-input')?.click()}
-              className="aspect-[3/4] rounded-xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center gap-2 hover:border-saree-gold/50 hover:bg-saree-gold/5 transition-all group"
+              className="aspect-[3/4] rounded-xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center gap-2 hover:border-saree-gold/50 hover:bg-saree-gold/5 transition-all group p-4 text-center"
             >
               <Upload className="w-6 h-6 text-gray-300 group-hover:text-saree-gold" />
-              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Add Saree</span>
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Local Upload</span>
+            </button>
+
+            <button 
+              type="button"
+              onClick={() => setIsDriveOpen(true)}
+              className="aspect-[3/4] rounded-xl border-2 border-dashed border-stone-200 flex flex-col items-center justify-center gap-2 hover:border-saree-gold hover:bg-saree-gold/5 transition-all group p-4 text-center"
+            >
+              <svg className="w-6 h-6 text-gray-300 group-hover:text-saree-gold fill-current" viewBox="0 0 24 24">
+                <path d="M19.345 9.176l-5.69-9.176h-3.31l5.69 9.176h3.31zm-6.855-9.176h-1l-7.49 12.824h1l7.49-12.824zm-.5 13.824l-1.85-3.176h-5.14l1.85 3.176h5.14zm9.355.176l-1.85-3.176h-5.14l1.85 3.176h5.14z"/>
+              </svg>
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest group-hover:text-saree-gold">Import Drive</span>
             </button>
           </div>
 
@@ -325,13 +395,30 @@ COMMAND: Generate the image of the SAME saree described above, but re-arranged i
                   <img src={res.url} alt="Result" className="w-full h-full object-cover" />
                   <div className="absolute top-3 right-3 flex gap-2">
                     <button 
+                      onClick={() => exportToDrive(res.sourceId, res.url, idx)}
+                      disabled={uploadingToDriveId === res.sourceId}
+                      className="p-2 rounded-full bg-white/90 backdrop-blur-sm text-saree-gold shadow-lg hover:bg-white flex items-center justify-center transition-all disabled:opacity-55"
+                      title="Save to Google Drive"
+                    >
+                      {uploadingToDriveId === res.sourceId ? (
+                        <RefreshCw className="w-4 h-4 animate-spin text-saree-gold" />
+                      ) : driveUploadSuccess === res.sourceId ? (
+                        <Check className="w-4 h-4 text-green-600" />
+                      ) : (
+                        <svg className="w-4 h-4 fill-current text-saree-gold animate-pulse" viewBox="0 0 24 24">
+                          <path d="M19.345 9.176l-5.69-9.176h-3.31l5.69 9.176h3.31zm-6.855-9.176h-1l-7.49 12.824h1l7.49-12.824zm-.5 13.824l-1.85-3.176h-5.14l1.85 3.176h5.14zm9.355.176l-1.85-3.176h-5.14l1.85 3.176h5.14z"/>
+                        </svg>
+                      )}
+                    </button>
+                    <button 
                       onClick={() => {
                         const link = document.createElement('a');
                         link.href = res.url;
                         link.download = `Signature_Saree_${idx + 1}.png`;
                         link.click();
                       }}
-                      className="p-2 rounded-full bg-white/90 backdrop-blur-sm text-saree-maroon shadow-lg hover:bg-white"
+                      className="p-2 rounded-full bg-white/90 backdrop-blur-sm text-saree-maroon shadow-lg hover:bg-white flex items-center justify-center"
+                      title="Download to Local"
                     >
                       <Download className="w-4 h-4" />
                     </button>
@@ -367,6 +454,14 @@ COMMAND: Generate the image of the SAME saree described above, but re-arranged i
           </div>
         </div>
       </div>
+
+      <DriveBrowserModal 
+        isOpen={isDriveOpen}
+        onClose={() => setIsDriveOpen(false)}
+        onImportPhotos={handleDriveImport}
+        maxSelectable={50}
+        currentPhotosCount={sourceImages.length}
+      />
     </div>
   );
 }

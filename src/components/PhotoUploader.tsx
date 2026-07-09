@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { Upload, X, Grid, MoveHorizontal, PenTool } from 'lucide-react';
 import { Photo } from '../types';
 import { motion, Reorder } from 'motion/react';
+import DriveBrowserModal from './DriveBrowserModal';
 
 interface PhotoUploaderProps {
   photos: Photo[];
@@ -23,6 +24,7 @@ export default function PhotoUploader({
   maxPhotos = 20 
 }: PhotoUploaderProps) {
   const [isDragging, setIsDragging] = useState(false);
+  const [isDriveOpen, setIsDriveOpen] = useState(false);
 
   const handleFileChange = useCallback((files: FileList | null) => {
     if (!files) return;
@@ -44,6 +46,10 @@ export default function PhotoUploader({
     onPhotosChange(photos.filter(p => p.id !== id));
   };
 
+  const handleDriveImport = (drivePhotos: Photo[]) => {
+    onPhotosChange([...photos, ...drivePhotos]);
+  };
+
   return (
     <div className="w-full max-w-4xl mx-auto p-6 space-y-8">
       <div className="text-center space-y-2">
@@ -54,11 +60,10 @@ export default function PhotoUploader({
       <div 
         className={`relative group border-2 border-dashed rounded-3xl p-12 transition-all text-center ${
           isDragging ? 'border-saree-gold bg-saree-gold/5' : 'border-saree-gold/20'
-        } ${photos.length >= maxPhotos ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-saree-gold/50'}`}
+        }`}
         onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
         onDragLeave={() => setIsDragging(false)}
         onDrop={(e) => { e.preventDefault(); setIsDragging(false); handleFileChange(e.dataTransfer.files); }}
-        onClick={() => document.getElementById('photo-input')?.click()}
       >
         <input 
           id="photo-input"
@@ -81,6 +86,29 @@ export default function PhotoUploader({
               {photos.length} / {maxPhotos} images selected
             </p>
           </div>
+          
+          {photos.length < maxPhotos && (
+            <div className="flex gap-4 mt-2">
+              <button
+                type="button"
+                onClick={() => document.getElementById('photo-input')?.click()}
+                className="px-5 py-2.5 rounded-xl bg-saree-maroon text-white font-bold text-xs uppercase tracking-wider hover:bg-saree-ink transition-all active:scale-95 shadow-md flex items-center gap-2"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                Upload Local
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsDriveOpen(true)}
+                className="px-5 py-2.5 rounded-xl bg-stone-900 border border-saree-gold/30 text-saree-gold font-bold text-xs uppercase tracking-wider hover:bg-saree-ink hover:border-saree-gold transition-all active:scale-95 shadow-md flex items-center gap-2"
+              >
+                <svg className="w-3.5 h-3.5 fill-current text-saree-gold" viewBox="0 0 24 24">
+                  <path d="M19.345 9.176l-5.69-9.176h-3.31l5.69 9.176h3.31zm-6.855-9.176h-1l-7.49 12.824h1l7.49-12.824zm-.5 13.824l-1.85-3.176h-5.14l1.85 3.176h5.14zm9.355.176l-1.85-3.176h-5.14l1.85 3.176h5.14z"/>
+                </svg>
+                Google Drive
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -147,6 +175,14 @@ export default function PhotoUploader({
           Our AI will analyze your notes and select choice fragments for the cinematic overlays.
         </p>
       </motion.div>
+
+      <DriveBrowserModal 
+        isOpen={isDriveOpen}
+        onClose={() => setIsDriveOpen(false)}
+        onImportPhotos={handleDriveImport}
+        maxSelectable={maxPhotos}
+        currentPhotosCount={photos.length}
+      />
     </div>
   );
 }
