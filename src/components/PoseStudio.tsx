@@ -9,6 +9,7 @@ import { getOrCreateCoutureFolder, uploadFileToDrive } from '../lib/drive';
 
 interface PoseStudioProps {
   onBack: () => void;
+  driveEnabled?: boolean;
 }
 
 // Target Pose Description based on the user's "Signature Pose" image
@@ -50,7 +51,7 @@ PROHIBITED ELEMENTS (NEGATIVE PROMPT):
 - NO other saree poses (e.g., draped on a person or laid flat without pleats).
 `;
 
-export default function PoseStudio({ onBack }: PoseStudioProps) {
+export default function PoseStudio({ onBack, driveEnabled = false }: PoseStudioProps) {
   const [sourceImages, setSourceImages] = useState<Photo[]>([]);
   const [results, setResults] = useState<{ sourceId: string, url: string }[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -315,16 +316,18 @@ COMMAND: Generate the image of the SAME saree described above, but re-arranged i
               <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Local Upload</span>
             </button>
 
-            <button 
-              type="button"
-              onClick={() => setIsDriveOpen(true)}
-              className="aspect-[3/4] rounded-xl border-2 border-dashed border-stone-200 flex flex-col items-center justify-center gap-2 hover:border-saree-gold hover:bg-saree-gold/5 transition-all group p-4 text-center"
-            >
-              <svg className="w-6 h-6 text-gray-300 group-hover:text-saree-gold fill-current" viewBox="0 0 24 24">
-                <path d="M19.345 9.176l-5.69-9.176h-3.31l5.69 9.176h3.31zm-6.855-9.176h-1l-7.49 12.824h1l7.49-12.824zm-.5 13.824l-1.85-3.176h-5.14l1.85 3.176h5.14zm9.355.176l-1.85-3.176h-5.14l1.85 3.176h5.14z"/>
-              </svg>
-              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest group-hover:text-saree-gold">Import Drive</span>
-            </button>
+            {driveEnabled && (
+              <button 
+                type="button"
+                onClick={() => setIsDriveOpen(true)}
+                className="aspect-[3/4] rounded-xl border-2 border-dashed border-stone-200 flex flex-col items-center justify-center gap-2 hover:border-saree-gold hover:bg-saree-gold/5 transition-all group p-4 text-center"
+              >
+                <svg className="w-6 h-6 text-gray-300 group-hover:text-saree-gold fill-current" viewBox="0 0 24 24">
+                  <path d="M19.345 9.176l-5.69-9.176h-3.31l5.69 9.176h3.31zm-6.855-9.176h-1l-7.49 12.824h1l7.49-12.824zm-.5 13.824l-1.85-3.176h-5.14l1.85 3.176h5.14zm9.355.176l-1.85-3.176h-5.14l1.85 3.176h5.14z"/>
+                </svg>
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest group-hover:text-saree-gold">Import Drive</span>
+              </button>
+            )}
           </div>
 
           <input 
@@ -394,22 +397,24 @@ COMMAND: Generate the image of the SAME saree described above, but re-arranged i
                 >
                   <img src={res.url} alt="Result" className="w-full h-full object-cover" />
                   <div className="absolute top-3 right-3 flex gap-2">
-                    <button 
-                      onClick={() => exportToDrive(res.sourceId, res.url, idx)}
-                      disabled={uploadingToDriveId === res.sourceId}
-                      className="p-2 rounded-full bg-white/90 backdrop-blur-sm text-saree-gold shadow-lg hover:bg-white flex items-center justify-center transition-all disabled:opacity-55"
-                      title="Save to Google Drive"
-                    >
-                      {uploadingToDriveId === res.sourceId ? (
-                        <RefreshCw className="w-4 h-4 animate-spin text-saree-gold" />
-                      ) : driveUploadSuccess === res.sourceId ? (
-                        <Check className="w-4 h-4 text-green-600" />
-                      ) : (
-                        <svg className="w-4 h-4 fill-current text-saree-gold animate-pulse" viewBox="0 0 24 24">
-                          <path d="M19.345 9.176l-5.69-9.176h-3.31l5.69 9.176h3.31zm-6.855-9.176h-1l-7.49 12.824h1l7.49-12.824zm-.5 13.824l-1.85-3.176h-5.14l1.85 3.176h5.14zm9.355.176l-1.85-3.176h-5.14l1.85 3.176h5.14z"/>
-                        </svg>
-                      )}
-                    </button>
+                    {driveEnabled && (
+                      <button 
+                        onClick={() => exportToDrive(res.sourceId, res.url, idx)}
+                        disabled={uploadingToDriveId === res.sourceId}
+                        className="p-2 rounded-full bg-white/90 backdrop-blur-sm text-saree-gold shadow-lg hover:bg-white flex items-center justify-center transition-all disabled:opacity-55"
+                        title="Save to Google Drive"
+                      >
+                        {uploadingToDriveId === res.sourceId ? (
+                          <RefreshCw className="w-4 h-4 animate-spin text-saree-gold" />
+                        ) : driveUploadSuccess === res.sourceId ? (
+                          <Check className="w-4 h-4 text-green-600" />
+                        ) : (
+                          <svg className="w-4 h-4 fill-current text-saree-gold animate-pulse" viewBox="0 0 24 24">
+                            <path d="M19.345 9.176l-5.69-9.176h-3.31l5.69 9.176h3.31zm-6.855-9.176h-1l-7.49 12.824h1l7.49-12.824zm-.5 13.824l-1.85-3.176h-5.14l1.85 3.176h5.14zm9.355.176l-1.85-3.176h-5.14l1.85 3.176h5.14z"/>
+                          </svg>
+                        )}
+                      </button>
+                    )}
                     <button 
                       onClick={() => {
                         const link = document.createElement('a');

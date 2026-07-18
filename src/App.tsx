@@ -74,6 +74,12 @@ export default function App() {
   const [musicEnabled, setMusicEnabled] = useState(() => {
     return localStorage.getItem('nivra_music_enabled') === 'true'; // Default false as requested
   });
+  const [driveEnabled, setDriveEnabled] = useState(() => {
+    return localStorage.getItem('nivra_drive_enabled') === 'true'; // Default false
+  });
+  const [instagramEnabled, setInstagramEnabled] = useState(() => {
+    return localStorage.getItem('nivra_instagram_enabled') === 'true'; // Default false
+  });
 
   useEffect(() => {
     localStorage.setItem('nivra_brand_name', brandName);
@@ -86,6 +92,15 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('nivra_music_enabled', String(musicEnabled));
   }, [musicEnabled]);
+
+  useEffect(() => {
+    localStorage.setItem('nivra_drive_enabled', String(driveEnabled));
+  }, [driveEnabled]);
+
+  useEffect(() => {
+    localStorage.setItem('nivra_instagram_enabled', String(instagramEnabled));
+  }, [instagramEnabled]);
+
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [state]);
@@ -542,6 +557,44 @@ export default function App() {
                         />
                       </button>
                     </div>
+
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="flex flex-col">
+                        <span className="text-sm font-semibold text-saree-ink">Google Drive Sync</span>
+                        <span className="text-[10px] text-gray-400">Enable Google Drive integration</span>
+                      </div>
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDriveEnabled(!driveEnabled);
+                        }}
+                        className={`w-10 h-5 rounded-full transition-colors relative ${driveEnabled ? 'bg-saree-gold' : 'bg-gray-200'}`}
+                      >
+                        <motion.div 
+                          animate={{ x: driveEnabled ? 20 : 2 }}
+                          className="absolute top-1 left-0 w-3 h-3 bg-white rounded-full shadow-sm"
+                        />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="flex flex-col">
+                        <span className="text-sm font-semibold text-saree-ink">Instagram Auto-Post</span>
+                        <span className="text-[10px] text-gray-400">Directly post reels to Instagram</span>
+                      </div>
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setInstagramEnabled(!instagramEnabled);
+                        }}
+                        className={`w-10 h-5 rounded-full transition-colors relative ${instagramEnabled ? 'bg-saree-gold' : 'bg-gray-200'}`}
+                      >
+                        <motion.div 
+                          animate={{ x: instagramEnabled ? 20 : 2 }}
+                          className="absolute top-1 left-0 w-3 h-3 bg-white rounded-full shadow-sm"
+                        />
+                      </button>
+                    </div>
                   </div>
                 </motion.div>
               )}
@@ -730,7 +783,7 @@ export default function App() {
               exit={{ opacity: 0, scale: 1.05 }}
               className="w-full h-full"
             >
-              <PoseStudio onBack={() => triggerStepChange('landing')} />
+              <PoseStudio onBack={() => triggerStepChange('landing')} driveEnabled={driveEnabled} />
             </motion.div>
           )}
 
@@ -797,6 +850,8 @@ export default function App() {
                 isExporting={isExporting}
                 exportProgress={exportProgress}
                 videoUrl={videoUrl}
+                driveEnabled={driveEnabled}
+                instagramEnabled={instagramEnabled}
               />
               
               {isExporting && (

@@ -31,6 +31,8 @@ interface ReelPreviewProps {
   isExporting?: boolean;
   exportProgress?: number;
   videoUrl?: string | null;
+  driveEnabled?: boolean;
+  instagramEnabled?: boolean;
 }
 
 const TRANSITION_VARIANTS = [
@@ -127,6 +129,8 @@ export default function ReelPreview({
   isExporting = false,
   exportProgress = 0,
   videoUrl = null,
+  driveEnabled = false,
+  instagramEnabled = false,
 }: ReelPreviewProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
@@ -143,12 +147,80 @@ export default function ReelPreview({
   const [driveFileUrl, setDriveFileUrl] = useState<string | null>(null);
   const [copiedDriveLink, setCopiedDriveLink] = useState(false);
 
+  // Instagram direct post state
+  const [isPostingToInstagram, setIsPostingToInstagram] = useState(false);
+  const [instagramPostSuccess, setInstagramPostSuccess] = useState(false);
+  const [instagramPostError, setInstagramPostError] = useState<string | null>(null);
+  const [instagramPermalink, setInstagramPermalink] = useState<string | null>(null);
+  const [showInstagramAuthModal, setShowInstagramAuthModal] = useState(false);
+
+  // Connection settings
+  const [instaAccessToken, setInstaAccessToken] = useState(() => {
+    return localStorage.getItem('nivra_instagram_access_token') || '';
+  });
+  const [instaAccountId, setInstaAccountId] = useState(() => {
+    return localStorage.getItem('nivra_instagram_account_id') || '';
+  });
+  const [instaUsername, setInstaUsername] = useState(() => {
+    return localStorage.getItem('nivra_instagram_username') || '';
+  });
+  const [instaName, setInstaName] = useState(() => {
+    return localStorage.getItem('nivra_instagram_name') || '';
+  });
+  const [instaProfilePic, setInstaProfilePic] = useState(() => {
+    return localStorage.getItem('nivra_instagram_profile_pic') || '';
+  });
+
+  const [authAccounts, setAuthAccounts] = useState<any[]>([]);
+  const [isAuthenticatingInsta, setIsAuthenticatingInsta] = useState(false);
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     setDriveFileUrl(null);
+    setInstagramPostSuccess(false);
+    setInstagramPostError(null);
+    setInstagramPermalink(null);
   }, [videoUrl]);
+
+  useEffect(() => {
+    localStorage.setItem('nivra_instagram_access_token', instaAccessToken);
+    localStorage.setItem('nivra_instagram_account_id', instaAccountId);
+    localStorage.setItem('nivra_instagram_username', instaUsername);
+    localStorage.setItem('nivra_instagram_name', instaName);
+    localStorage.setItem('nivra_instagram_profile_pic', instaProfilePic);
+  }, [instaAccessToken, instaAccountId, instaUsername, instaName, instaProfilePic]);
+
+  useEffect(() => {
+    const handleOauthMessage = (event: MessageEvent) => {
+      const origin = event.origin;
+      if (!origin.endsWith('.run.app') && !origin.includes('localhost')) {
+        return;
+      }
+      if (event.data?.type === 'INSTAGRAM_AUTH_SUCCESS') {
+        setIsAuthenticatingInsta(false);
+        const accounts = event.data.accounts || [];
+        if (accounts.length > 0) {
+          setAuthAccounts(accounts);
+          // Auto-select the first account
+          const first = accounts[0];
+          setInstaAccessToken(first.accessToken || event.data.accessToken || '');
+          setInstaAccountId(first.instagramId || '');
+          setInstaUsername(first.username || '');
+          setInstaName(first.name || '');
+          setInstaProfilePic(first.profilePicture || '');
+        } else {
+          setInstagramPostError("Facebook authorization succeeded, but no linked Instagram Business or Creator accounts were found. Make sure your Instagram Account is linked to a Facebook Page.");
+        }
+      } else if (event.data?.type === 'INSTAGRAM_AUTH_ERROR') {
+        setIsAuthenticatingInsta(false);
+        setInstagramPostError(event.data.error || "Facebook Login failed.");
+      }
+    };
+    window.addEventListener('message', handleOauthMessage);
+    return () => window.removeEventListener('message', handleOauthMessage);
+  }, []);
 
   const handleDriveExport = async () => {
     if (!videoUrl) return;
@@ -177,33 +249,20 @@ export default function ReelPreview({
       // Since browser-native MediaRecorder is WebM, transcode it server-side to high-compat standard H.264 MP4
       console.log("Transcoding source video to H.264 MP4 for maximum Google Drive compatibility...");
       
-      const reader = new FileReader();
-      const base64Data = await new Promise<string>((resolve, reject) => {
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
-
       const transcodeRes = await fetch("/api/transcode", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
+          "Content-Type": blob.type || "video/webm",
         },
-        body: JSON.stringify({ videoData: base64Data }),
+        body: blob,
       });
 
       if (!transcodeRes.ok) {
         throw new Error(`MP4 Transcoder returned error status ${transcodeRes.status}`);
       }
 
-      const transcodeResult = await transcodeRes.json();
-      if (transcodeResult.videoData) {
-        const transcodeResponse = await fetch(transcodeResult.videoData);
-        uploadBlob = await transcodeResponse.blob();
-        console.log("Server-side H.264 MP4 transcoding succeeded!");
-      } else {
-        throw new Error("Transcoding failed: server response missing videoData");
-      }
+      uploadBlob = await transcodeRes.blob();
+      console.log("Server-side H.264 MP4 transcoding succeeded!");
 
       const folderId = await getOrCreateCoutureFolder(token, 'Kanchipuram Couture');
       const filename = `Kanchipuram_Saree_Reel_${Date.now()}.mp4`;
@@ -219,6 +278,108 @@ export default function ReelPreview({
       setTimeout(() => setDriveSaveError(null), 5000);
     } finally {
       setIsSavingToDrive(false);
+    }
+  };
+
+  const handleInstagramPost = async () => {
+    if (!videoUrl) return;
+
+    // Validate credentials
+    if (!instaAccessToken || !instaAccountId) {
+      setShowInstagramAuthModal(true);
+      return;
+    }
+
+    setIsPostingToInstagram(true);
+    setInstagramPostSuccess(false);
+    setInstagramPostError(null);
+    setInstagramPermalink(null);
+
+    try {
+      console.log("Preparing video binary for Instagram Direct publishing...");
+      const videoResponse = await fetch(videoUrl);
+      const videoBlob = await videoResponse.blob();
+
+      console.log("Uploading video binary to public server cache...");
+      const prepResponse = await fetch("/api/instagram/prepare", {
+        method: "POST",
+        headers: {
+          "Content-Type": videoBlob.type || "video/mp4",
+        },
+        body: videoBlob,
+      });
+
+      if (!prepResponse.ok) {
+        throw new Error("Failed to cache video on publishing server. Check network connection.");
+      }
+
+      const prepData = await prepResponse.json();
+      const videoId = prepData.id;
+
+      console.log("Initiating server-side direct Instagram publishing process...");
+      const publishRes = await fetch("/api/instagram/publish", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          accessToken: instaAccessToken,
+          instagramId: instaAccountId,
+          videoId: videoId,
+          caption: instagramCaption || "Luxury Heritage Couture. Created using Kanchipuram Couture. #kanchipuram #saree #reels #luxury"
+        })
+      });
+
+      if (!publishRes.ok) {
+        const errData = await publishRes.json();
+        throw new Error(errData.error || "Direct publishing to Instagram failed.");
+      }
+
+      const publishData = await publishRes.json();
+      if (publishData.success) {
+        setInstagramPostSuccess(true);
+        setInstagramPermalink(publishData.permalink);
+        console.log("Direct Instagram post succeeded! Post URL:", publishData.permalink);
+      } else {
+        throw new Error("Instagram published with no success indication.");
+      }
+    } catch (err: any) {
+      console.error("Direct Instagram publishing failed:", err);
+      setInstagramPostError(err.message || "Failed to post video to Instagram directly.");
+    } finally {
+      setIsPostingToInstagram(false);
+    }
+  };
+
+  const handleFacebookLogin = async () => {
+    setIsAuthenticatingInsta(true);
+    setInstagramPostError(null);
+    try {
+      const response = await fetch("/api/instagram/auth-url");
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || "Direct login API endpoint returned error.");
+      }
+      const { url } = await response.json();
+      
+      const width = 600;
+      const height = 700;
+      const left = window.screen.width / 2 - width / 2;
+      const top = window.screen.height / 2 - height / 2;
+      
+      const authWindow = window.open(
+        url,
+        'instagram_oauth_popup',
+        `width=${width},height=${height},left=${left},top=${top}`
+      );
+      
+      if (!authWindow) {
+        alert("Popups are blocked. Please enable popups to authenticate with Facebook/Instagram.");
+        setIsAuthenticatingInsta(false);
+      }
+    } catch (err: any) {
+      setIsAuthenticatingInsta(false);
+      setInstagramPostError(err.message || "Could not launch Facebook Login pop-up.");
     }
   };
 
@@ -985,34 +1146,36 @@ export default function ReelPreview({
 
           {videoUrl && !isExporting ? (
             <div className="space-y-4 w-full">
-              <div className="grid grid-cols-2 gap-4 w-full">
+              <div className={`${driveEnabled ? 'grid grid-cols-2' : 'flex'} gap-4 w-full`}>
                 <button 
                   onClick={handleDownload}
-                  className="py-5 rounded-2xl flex items-center justify-center gap-3 font-bold uppercase tracking-widest transition-all shadow-xl active:scale-95 group bg-saree-gold text-stone-950 hover:bg-saree-gold/90 shadow-saree-gold/20"
+                  className={`py-5 rounded-2xl flex items-center justify-center gap-3 font-bold uppercase tracking-widest transition-all shadow-xl active:scale-95 group bg-saree-gold text-stone-950 hover:bg-saree-gold/90 shadow-saree-gold/20 ${driveEnabled ? '' : 'w-full'}`}
                 >
                   {Capacitor.isNativePlatform() ? <Share2 className="w-5 h-5" /> : <Download className="w-5 h-5" />}
                   {Capacitor.isNativePlatform() ? 'Save/Share' : 'Download'}
                 </button>
                 
-                <button 
-                  onClick={handleDriveExport}
-                  disabled={isSavingToDrive}
-                  className="py-5 rounded-2xl flex items-center justify-center gap-3 font-bold uppercase tracking-widest transition-all shadow-xl active:scale-95 group bg-stone-900 border border-saree-gold/30 text-saree-gold hover:bg-stone-950 disabled:opacity-55"
-                >
-                  {isSavingToDrive ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                  ) : driveSaveSuccess ? (
-                    <Check className="w-5 h-5 text-green-500" />
-                  ) : (
-                    <svg className="w-5 h-5 fill-current text-saree-gold" viewBox="0 0 24 24">
-                      <path d="M19.345 9.176l-5.69-9.176h-3.31l5.69 9.176h3.31zm-6.855-9.176h-1l-7.49 12.824h1l7.49-12.824zm-.5 13.824l-1.85-3.176h-5.14l1.85 3.176h5.14zm9.355.176l-1.85-3.176h-5.14l1.85 3.176h5.14z"/>
-                    </svg>
-                  )}
-                  {driveSaveSuccess ? 'Saved!' : 'Save Drive'}
-                </button>
+                {driveEnabled && (
+                  <button 
+                    onClick={handleDriveExport}
+                    disabled={isSavingToDrive}
+                    className="py-5 rounded-2xl flex items-center justify-center gap-3 font-bold uppercase tracking-widest transition-all shadow-xl active:scale-95 group bg-stone-900 border border-saree-gold/30 text-saree-gold hover:bg-stone-950 disabled:opacity-55"
+                  >
+                    {isSavingToDrive ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : driveSaveSuccess ? (
+                      <Check className="w-5 h-5 text-green-500" />
+                    ) : (
+                      <svg className="w-5 h-5 fill-current text-saree-gold" viewBox="0 0 24 24">
+                        <path d="M19.345 9.176l-5.69-9.176h-3.31l5.69 9.176h3.31zm-6.855-9.176h-1l-7.49 12.824h1l7.49-12.824zm-.5 13.824l-1.85-3.176h-5.14l1.85 3.176h5.14zm9.355.176l-1.85-3.176h-5.14l1.85 3.176h5.14z"/>
+                      </svg>
+                    )}
+                    {driveSaveSuccess ? 'Saved!' : 'Save Drive'}
+                  </button>
+                )}
               </div>
 
-              {driveFileUrl && (
+              {driveEnabled && driveFileUrl && (
                 <motion.div 
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -1059,6 +1222,62 @@ export default function ReelPreview({
                       )}
                     </button>
                   </div>
+                </motion.div>
+              )}
+
+              {instagramEnabled && (
+                <div className="pt-2">
+                  <button 
+                    onClick={handleInstagramPost}
+                    disabled={isPostingToInstagram}
+                    className="w-full py-5 rounded-2xl flex items-center justify-center gap-3 font-bold uppercase tracking-widest transition-all shadow-xl active:scale-95 group bg-stone-900 text-saree-gold hover:bg-stone-950 shadow-saree-gold/10 border border-saree-gold/30 disabled:opacity-50"
+                  >
+                    {isPostingToInstagram ? (
+                      <Loader2 className="w-5 h-5 animate-spin text-saree-gold" />
+                    ) : instagramPostSuccess ? (
+                      <Check className="w-5 h-5 text-green-400" />
+                    ) : (
+                      <Instagram className="w-5 h-5 text-saree-gold group-hover:scale-110 transition-transform" />
+                    )}
+                    {isPostingToInstagram ? 'Publishing Reel...' : instagramPostSuccess ? 'Published to Instagram!' : 'Post to Instagram'}
+                  </button>
+                </div>
+              )}
+
+              {instagramEnabled && (instagramPostSuccess || instagramPostError) && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className={`p-5 rounded-2xl border text-center flex flex-col gap-3 ${instagramPostSuccess ? 'bg-green-500/5 border-green-500/20' : 'bg-red-500/5 border-red-500/20'}`}
+                >
+                  <div className={`flex items-center justify-center gap-2 font-bold text-xs uppercase tracking-widest ${instagramPostSuccess ? 'text-green-500' : 'text-red-500'}`}>
+                    {instagramPostSuccess ? <Check className="w-4 h-4" /> : <Sparkles className="w-4 h-4 text-saree-gold" />}
+                    {instagramPostSuccess ? 'Instagram Live!' : 'Direct Posting Info'}
+                  </div>
+                  <p className="text-stone-500 text-[11px] leading-relaxed">
+                    {instagramPostSuccess 
+                      ? 'Your luxurious heritage reel has been successfully posted to your Instagram feed! Watch it live:' 
+                      : instagramPostError}
+                  </p>
+                  {instagramPostSuccess && instagramPermalink && (
+                    <div className="flex gap-2 w-full mt-1">
+                      <a 
+                        href={instagramPermalink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 py-3 px-4 rounded-xl bg-saree-maroon text-white font-bold text-xs uppercase tracking-widest hover:bg-saree-ink transition-all flex items-center justify-center gap-2 shadow-sm"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        View Live Reel
+                      </a>
+                    </div>
+                  )}
+                  <button
+                    onClick={() => setShowInstagramAuthModal(true)}
+                    className="text-[10px] text-saree-gold hover:underline font-bold uppercase tracking-wider mt-1"
+                  >
+                    Manage Instagram Credentials
+                  </button>
                 </motion.div>
               )}
             </div>
@@ -1202,6 +1421,196 @@ export default function ReelPreview({
             </p>
           </div>
         </motion.div>
+      )}
+
+      {showInstagramAuthModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="w-full max-w-lg bg-white border border-saree-gold/20 rounded-3xl overflow-hidden shadow-2xl"
+          >
+            {/* Header */}
+            <div className="p-6 bg-stone-900 border-b border-saree-gold/20 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Instagram className="w-5 h-5 text-saree-gold" />
+                <h3 className="display-text text-lg font-medium text-white tracking-wide">Instagram Connection Setup</h3>
+              </div>
+              <button 
+                onClick={() => setShowInstagramAuthModal(false)}
+                className="text-stone-400 hover:text-white transition-colors font-bold text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto no-scrollbar">
+              {instaAccountId && instaUsername ? (
+                <div className="p-4 bg-saree-gold/5 border border-saree-gold/20 rounded-2xl flex items-center gap-4">
+                  {instaProfilePic ? (
+                    <img 
+                      src={instaProfilePic} 
+                      alt={instaUsername} 
+                      referrerPolicy="no-referrer"
+                      className="w-12 h-12 rounded-full object-cover border border-saree-gold/30"
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-full bg-saree-maroon/25 text-saree-maroon flex items-center justify-center font-bold text-lg uppercase">
+                      {instaUsername[0]}
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-saree-ink truncate">{instaName || 'Connected Account'}</p>
+                    <p className="text-xs text-stone-500 truncate">@{instaUsername}</p>
+                    <p className="text-[9px] text-gray-400 uppercase tracking-widest mt-1">ID: {instaAccountId}</p>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      setInstaAccessToken('');
+                      setInstaAccountId('');
+                      setInstaUsername('');
+                      setInstaName('');
+                      setInstaProfilePic('');
+                      setAuthAccounts([]);
+                    }}
+                    className="px-3 py-1.5 rounded-lg border border-red-200 hover:bg-red-50 text-red-600 font-bold text-xs uppercase tracking-wider transition-colors"
+                  >
+                    Disconnect
+                  </button>
+                </div>
+              ) : (
+                <div className="text-center py-4 space-y-3">
+                  <div className="w-12 h-12 bg-saree-gold/10 text-saree-gold rounded-full flex items-center justify-center mx-auto">
+                    <Instagram className="w-6 h-6" />
+                  </div>
+                  <p className="text-sm font-semibold text-saree-ink">Connect Your Instagram Professional Account</p>
+                  <p className="text-xs text-stone-500 max-w-sm mx-auto leading-relaxed">
+                    To post directly, link your Instagram Business/Creator Account to a Facebook Page, then click Connect.
+                  </p>
+                  <button 
+                    onClick={handleFacebookLogin}
+                    disabled={isAuthenticatingInsta}
+                    className="px-6 py-3 bg-saree-maroon hover:bg-saree-ink text-white font-bold text-xs uppercase tracking-widest rounded-xl shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 mx-auto disabled:opacity-55"
+                  >
+                    {isAuthenticatingInsta ? <Loader2 className="w-4 h-4 animate-spin text-saree-gold" /> : <Instagram className="w-4 h-4" />}
+                    {isAuthenticatingInsta ? 'Connecting...' : 'Connect with Facebook'}
+                  </button>
+                </div>
+              )}
+
+              {/* If we have multiple accounts discovered during login, show selection */}
+              {authAccounts.length > 1 && (
+                <div className="space-y-3">
+                  <p className="text-xs font-bold uppercase tracking-wider text-saree-ink">Select Instagram Account:</p>
+                  <div className="space-y-2">
+                    {authAccounts.map((acc) => (
+                      <button
+                        key={acc.instagramId}
+                        onClick={() => {
+                          setInstaAccessToken(acc.accessToken || instaAccessToken);
+                          setInstaAccountId(acc.instagramId);
+                          setInstaUsername(acc.username);
+                          setInstaName(acc.name);
+                          setInstaProfilePic(acc.profilePicture);
+                        }}
+                        className={`w-full p-3 rounded-xl border text-left flex items-center gap-3 transition-all ${
+                          instaAccountId === acc.instagramId 
+                            ? 'border-saree-gold bg-saree-gold/5 shadow-sm' 
+                            : 'border-gray-100 hover:border-saree-gold/30'
+                        }`}
+                      >
+                        {acc.profilePicture ? (
+                          <img 
+                            src={acc.profilePicture} 
+                            alt={acc.username} 
+                            referrerPolicy="no-referrer"
+                            className="w-8 h-8 rounded-full border"
+                          />
+                        ) : (
+                          <div className="w-8 h-8 rounded-full bg-stone-100 flex items-center justify-center font-bold uppercase text-xs">
+                            {acc.username[0]}
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-xs truncate text-stone-800">{acc.name}</p>
+                          <p className="text-[10px] text-stone-500">@{acc.username}</p>
+                        </div>
+                        {instaAccountId === acc.instagramId && (
+                          <Check className="w-4 h-4 text-saree-gold" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Manual Config Section */}
+              <div className="border-t border-gray-100 pt-5 space-y-4">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest text-center">
+                  — Or Configure Manually (For Testing & Tokens) —
+                </p>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider font-bold text-stone-600 mb-1">
+                      Instagram Business Account ID
+                    </label>
+                    <input 
+                      type="text" 
+                      value={instaAccountId}
+                      onChange={(e) => {
+                        setInstaAccountId(e.target.value);
+                        if (!e.target.value) {
+                          setInstaUsername('');
+                        } else if (!instaUsername) {
+                          setInstaUsername('manual_account');
+                        }
+                      }}
+                      placeholder="e.g. 17841405367890123"
+                      className="w-full p-3 text-xs border border-gray-200 rounded-xl outline-none focus:border-saree-gold focus:ring-1 focus:ring-saree-gold/20 font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider font-bold text-stone-600 mb-1">
+                      Meta Access Token
+                    </label>
+                    <input 
+                      type="password" 
+                      value={instaAccessToken}
+                      onChange={(e) => setInstaAccessToken(e.target.value)}
+                      placeholder="EAAQD... (Page or User Access Token)"
+                      className="w-full p-3 text-xs border border-gray-200 rounded-xl outline-none focus:border-saree-gold focus:ring-1 focus:ring-saree-gold/20 font-mono"
+                    />
+                  </div>
+                  {instaAccountId && (
+                    <div>
+                      <label className="block text-[10px] uppercase tracking-wider font-bold text-stone-600 mb-1">
+                        Display Username (Optional)
+                      </label>
+                      <input 
+                        type="text" 
+                        value={instaUsername}
+                        onChange={(e) => setInstaUsername(e.target.value)}
+                        placeholder="e.g. luxury_kanchipuram_sarees"
+                        className="w-full p-3 text-xs border border-gray-200 rounded-xl outline-none focus:border-saree-gold focus:ring-1 focus:ring-saree-gold/20"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-6 bg-stone-50 border-t border-gray-100 flex justify-end gap-3">
+              <button 
+                onClick={() => setShowInstagramAuthModal(false)}
+                className="px-5 py-2.5 rounded-xl border border-gray-200 hover:bg-gray-100 font-bold text-xs uppercase tracking-widest text-stone-600 transition-all"
+              >
+                Close
+              </button>
+            </div>
+          </motion.div>
+        </div>
       )}
     </div>
   );
