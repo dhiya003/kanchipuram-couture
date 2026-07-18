@@ -15,6 +15,33 @@ const PORT = 3000;
 
 app.use(express.json({ limit: '100mb' }));
 
+async function transcodeVideo(inputPath: string, outputPath: string): Promise<void> {
+  // 1. Detect if the input video has an audio stream
+  let hasAudio = false;
+  try {
+    const { stdout } = await execPromise(
+      `ffprobe -v error -show_entries stream=codec_type -of default=noprint_wrappers=1:nokey=1 "${inputPath}"`
+    );
+    hasAudio = stdout.toLowerCase().includes("audio");
+    console.log(`ffprobe detected audio track in input video: ${hasAudio}`);
+  } catch (probeError: any) {
+    console.warn("ffprobe failed to detect audio stream, defaulting to false. Error:", probeError.message);
+  }
+
+  // 2. Select appropriate FFmpeg command
+  let command = "";
+  if (hasAudio) {
+    // Input has audio, copy/encode it
+    command = `ffmpeg -y -i "${inputPath}" -map 0:v -map 0:a -c:v libx264 -profile:v high -level:v 4.1 -pix_fmt yuv420p -preset fast -crf 23 -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -movflags +faststart -g 60 -r 30 -c:a aac -b:a 128k -ar 44100 -ac 2 "${outputPath}"`;
+  } else {
+    // Input does not have audio, generate a silent stereo track
+    command = `ffmpeg -y -i "${inputPath}" -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 -map 0:v -map 1:a -c:v libx264 -profile:v high -level:v 4.1 -pix_fmt yuv420p -preset fast -crf 23 -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -movflags +faststart -g 60 -r 30 -c:a aac -b:a 128k -ar 44100 -ac 2 -shortest "${outputPath}"`;
+  }
+
+  console.log(`Executing robust transcode command: ${command}`);
+  await execPromise(command);
+}
+
 app.post("/api/transcode", express.raw({ type: "*/*", limit: "100mb" }), async (req, res) => {
   const videoBuffer = req.body;
   if (!videoBuffer || videoBuffer.length === 0) {
@@ -29,10 +56,8 @@ app.post("/api/transcode", express.raw({ type: "*/*", limit: "100mb" }), async (
     // Write WebM file directly from buffer
     await fs.promises.writeFile(inputPath, videoBuffer);
 
-    // Run FFmpeg to transcode WebM to H.264 MP4 with AAC audio (if present)
-    const command = `ffmpeg -y -i ${inputPath} -c:v libx264 -pix_fmt yuv420p -preset fast -crf 23 -c:a aac -b:a 128k -map 0:v -map 0:a? ${outputPath}`;
-    console.log(`Executing FFmpeg command: ${command}`);
-    await execPromise(command);
+    // Run robust transcoding helper
+    await transcodeVideo(inputPath, outputPath);
 
     // Read generated MP4 file
     const mp4Buffer = await fs.promises.readFile(outputPath);
@@ -64,14 +89,13 @@ app.post("/api/instagram/prepare", express.raw({ type: "*/*", limit: "100mb" }),
     // Write raw video to input file
     await fs.promises.writeFile(inputPath, videoBuffer);
 
-    // Transcode input video to compliant H.264 MP4 with AAC audio
-    const command = `ffmpeg -y -i ${inputPath} -c:v libx264 -pix_fmt yuv420p -preset fast -crf 23 -c:a aac -b:a 128k -map 0:v -map 0:a? ${outputPath}`;
-    console.log(`Executing FFmpeg Instagram prepare command: ${command}`);
-    await execPromise(command);
+    // Run robust transcoding helper
+    await transcodeVideo(inputPath, outputPath);
 
-    const protocol = req.headers["x-forwarded-proto"] || "http";
-    const host = req.headers.host;
-    const videoUrl = `${protocol}://${host}/api/instagram/video/${tempId}`;
+    const host = req.headers.host || "";
+    const isLocal = host.includes("localhost") || host.includes("127.0.0.1") || host.includes("3000");
+    const protocol = isLocal ? "http" : "https";
+    const videoUrl = `${protocol}://${host}/api/instagram/video/${tempId}.mp4`;
 
     console.log(`Prepared and transcoded temporary Instagram video at: ${videoUrl}`);
     res.json({ id: tempId, url: videoUrl });
@@ -86,7 +110,11 @@ app.post("/api/instagram/prepare", express.raw({ type: "*/*", limit: "100mb" }),
 
 // 2. Serve prepared temporary video publicly for Facebook/Instagram Crawler
 app.get("/api/instagram/video/:id", async (req, res) => {
-  const filePath = path.join("/tmp", `instagram_${req.params.id}.mp4`);
+  let id = req.params.id;
+  if (id && id.endsWith(".mp4")) {
+    id = id.substring(0, id.length - 4);
+  }
+  const filePath = path.join("/tmp", `instagram_${id}.mp4`);
   if (fs.existsSync(filePath)) {
     res.setHeader("Content-Type", "video/mp4");
     res.sendFile(filePath);
@@ -212,18 +240,48 @@ app.post("/api/instagram/publish", async (req, res) => {
     return res.status(400).json({ error: "Missing required parameters (accessToken, instagramId, videoId)" });
   }
 
-  const protocol = req.headers["x-forwarded-proto"] || "http";
-  const host = req.headers.host;
-  const videoUrl = `${protocol}://${host}/api/instagram/video/${videoId}`;
+  const host = req.headers.host || "";
+  const isLocal = host.includes("localhost") || host.includes("127.0.0.1") || host.includes("3000");
+  const protocol = isLocal ? "http" : "https";
+  const videoUrl = `${protocol}://${host}/api/instagram/video/${videoId}.mp4`;
   const localFilePath = path.join("/tmp", `instagram_${videoId}.mp4`);
 
+  let publicVideoUrl = videoUrl;
   try {
-    console.log(`Publishing Reel to Instagram Account ${instagramId}. Video URL: ${videoUrl}`);
+    if (fs.existsSync(localFilePath)) {
+      console.log(`Uploading local video to secure public mirror (uguu.se) for direct Instagram download...`);
+      const fileBuffer = fs.readFileSync(localFilePath);
+      const blob = new Blob([fileBuffer], { type: 'video/mp4' });
+      const formData = new FormData();
+      formData.append('files[]', blob, `${videoId}.mp4`);
+      
+      const uploadRes = await fetch('https://uguu.se/upload.php', {
+        method: 'POST',
+        body: formData
+      });
+      if (uploadRes.ok) {
+        const uploadData: any = await uploadRes.json();
+        if (uploadData.success && uploadData.files && uploadData.files[0]?.url) {
+          publicVideoUrl = uploadData.files[0].url;
+          console.log(`Secure public mirror URL obtained: ${publicVideoUrl}`);
+        } else {
+          console.warn("uguu.se upload response did not return success:", uploadData);
+        }
+      } else {
+        console.warn(`uguu.se upload returned non-OK status: ${uploadRes.status}`);
+      }
+    }
+  } catch (err: any) {
+    console.warn("Failed to upload to secure public mirror, falling back to local container URL:", err.message);
+  }
+
+  try {
+    console.log(`Publishing Reel to Instagram Account ${instagramId}. Video URL: ${publicVideoUrl}`);
 
     // Step A: Create media container
     const containerParams = new URLSearchParams({
       media_type: "REELS",
-      video_url: videoUrl,
+      video_url: publicVideoUrl,
       caption: caption || "",
       access_token: accessToken
     });
@@ -246,11 +304,11 @@ app.post("/api/instagram/publish", async (req, res) => {
     let isFinished = false;
     let publishError = "";
 
-    while (attempts < 20 && !isFinished) {
+    while (attempts < 25 && !isFinished) {
       attempts++;
       await new Promise(resolve => setTimeout(resolve, 5000));
 
-      const checkRes = await fetch(`https://graph.facebook.com/v19.0/${containerId}?fields=status_code,status&access_token=${accessToken}`);
+      const checkRes = await fetch(`https://graph.facebook.com/v19.0/${containerId}?fields=status_code&access_token=${accessToken}`);
       const checkData: any = await checkRes.json();
 
       if (checkData.error) {
@@ -259,12 +317,12 @@ app.post("/api/instagram/publish", async (req, res) => {
         break;
       }
 
-      const status = checkData.status_code || checkData.status;
-      console.log(`Container status check #${attempts}: ${status}`);
+      const status = checkData.status_code;
+      console.log(`Container status check #${attempts}: ${status}`, checkData);
 
       if (status === "FINISHED") {
         isFinished = true;
-      } else if (status === "ERROR" || checkData.status === "FAILED") {
+      } else if (status === "ERROR") {
         publishError = checkData.error?.message || "Instagram processing failed. Check video size/format.";
         break;
       }
